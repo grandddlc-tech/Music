@@ -110,6 +110,11 @@ h1, h2, h3, h4 { margin: 0; font-weight: 800; letter-spacing: -.01em; }
 .searchbox input { flex: 1; border: 0; outline: 0; background: none; height: 100%; }
 .searchbox .ic { color: var(--muted); }
 .top-add { display: none; }
+.top-refresh { width: 46px; height: 46px; background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+.top-refresh:active .ic { transform: rotate(180deg); transition: transform .4s; }
+.folders.watched { margin: 10px 0 4px; }
+.folders.watched .frow { cursor: default; }
+.note.small { font-size: 13px; line-height: 1.7; align-items: flex-start; }
 .banner {
   margin: 8px 32px 0; padding: 12px 18px; border-radius: 14px; cursor: pointer;
   background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 30%, transparent), var(--surface));

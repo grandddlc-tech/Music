@@ -1,5 +1,5 @@
 /* Service worker: offline support */
-const CACHE = 'music-v2';
+const CACHE = 'music-v3';
 const CORE = [
   './', './index.html', './css/style.css', './manifest.webmanifest', './icons/icon.svg',
   './vendor/jsmediatags.min.js', './js/db.js', './js/artists.js', './js/country.js',

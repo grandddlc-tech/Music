@@ -24,6 +24,17 @@
     }
   };
 
+  /* Fast walk: yields file handles + paths without opening the files */
+  S.walkEntries = async function* (dir, prefix = '') {
+    for await (const entry of dir.values()) {
+      if (entry.kind === 'file' && S.isAudio(entry.name)) {
+        yield { handle: entry, path: prefix + entry.name };
+      } else if (entry.kind === 'directory' && !entry.name.startsWith('.')) {
+        yield* S.walkEntries(entry, prefix + entry.name + '/');
+      }
+    }
+  };
+
   function readTags(file) {
     return new Promise((resolve) => {
       if (!window.jsmediatags) return resolve({});

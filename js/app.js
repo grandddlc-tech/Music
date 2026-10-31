@@ -40,6 +40,7 @@
   const S = {
     tracks: new Map(),      // id → track
     files: new Map(),       // id → File (this session)
+    handles: new Map(),     // path → FileSystemFileHandle (watched folders)
     artists: new Map(),     // normalised artist name → { country, source, why, confidence, manual, checked }
     playlists: new Map(),   // id → { id, name, ids, created }
     coverUrls: new Map(),   // coverId → object URL
@@ -48,7 +49,7 @@
     dirs: [],               // FileSystemDirectoryHandle[]
     settings: {
       online: true, keepCopies: !window.showDirectoryPicker, accent: '#8b5cf6', dynamic: true,
-      theme: 'dark', volume: 0.9, rate: 1, eq: Array(10).fill(0), eqPreset: 'Flat', visualizer: true,
+      autoScan: true, theme: 'dark', volume: 0.9, rate: 1, eq: Array(10).fill(0), eqPreset: 'Flat', visualizer: true,
     },
     listenSeconds: 0,
     lists: {},              // rendered lists, so rows can be played in context
@@ -211,6 +212,11 @@
       const stored = await DB.get('files', id);
       if (stored) { f = stored; S.files.set(id, f); }
     }
+    if (!f) {
+      const t = S.tracks.get(id);
+      const h = t && S.handles.get(t.path);
+      if (h) { try { f = await h.getFile(); S.files.set(id, f); } catch (e) { /* file moved or deleted */ } }
+    }
     if (!f && S.dirs.length) {
       const ok = await ensureDirAccess(true);
       if (ok) f = S.files.get(id);
@@ -227,7 +233,7 @@
         if (p === 'granted') { any = true; if (!d._scanned) { d._scanned = true; await scanFromHandle(d, { quiet: true }); } }
       } catch (e) { /* stale handle */ }
     }
-    if (any) $('#access-banner').hidden = true;
+    if (any) { $('#access-banner').hidden = true; setupObservers(); }
     return any;
   }
 
@@ -247,14 +253,82 @@
     }
   }
 
-  async function scanFromHandle(d, opts = {}) {
-    const items = [];
-    showScan('Looking for music files…', 0, 0);
-    for await (const it of Scanner.walkHandle(d, d.name + '/')) {
-      items.push(it);
-      if (items.length % 50 === 0) showScan(`Found ${songs(items.length)}`, 0, 0);
+  /* Walk a watched folder: only files we haven't seen before are opened and imported,
+     and songs that were deleted from disk are removed. Returns the number of new songs. */
+  async function scanFromHandle(d, { quiet = false } = {}) {
+    const root = d.name + '/';
+    const known = new Map();
+    for (const t of S.tracks.values()) if (t.path.startsWith(root)) known.set(t.path, t);
+    const paths = new Set();
+    const fresh = [];
+    let n = 0;
+    if (!quiet) showScan('Looking for music files…', 0, 0);
+    for await (const { handle, path } of Scanner.walkEntries(d, root)) {
+      paths.add(path);
+      S.handles.set(path, handle);
+      if (!known.has(path)) { try { fresh.push({ file: await handle.getFile(), path }); } catch (e) { /* unreadable */ } }
+      if (!quiet && ++n % 100 === 0) showScan(`Found ${songs(n)}`, 0, 0);
     }
-    await ingest(items, { ...opts, root: d.name + '/' });
+    const gone = Array.from(known.values()).filter((t) => !paths.has(t.path));
+    if (!fresh.length && !gone.length) {
+      if (!quiet) { hideScan(); toast('No new songs found'); }
+      return 0;
+    }
+    await ingest(fresh, { quiet, removed: gone });
+    return fresh.length;
+  }
+
+  /* ---------- Watching folders for new music ---------- */
+  let autoScanning = false, lastAutoScan = 0;
+  async function checkForNewMusic({ manual = false } = {}) {
+    if (autoScanning || ingesting) return 0;
+    if (!S.dirs.length) {
+      if (manual) { if (window.showDirectoryPicker) addFolder(); else $('#dir-input').click(); }
+      return 0;
+    }
+    if (!manual && Date.now() - lastAutoScan < 15000) return 0;
+    autoScanning = true;
+    lastAutoScan = Date.now();
+    let added = 0, ok = false;
+    try {
+      for (const d of S.dirs) {
+        let p = 'denied';
+        try {
+          p = await d.queryPermission({ mode: 'read' });
+          if (p !== 'granted' && manual) p = await d.requestPermission({ mode: 'read' });
+        } catch (e) { /* stale handle */ }
+        if (p !== 'granted') continue;
+        ok = true;
+        d._scanned = true;
+        added += await scanFromHandle(d, { quiet: !manual });
+      }
+    } finally { autoScanning = false; }
+    if (ok) { $('#access-banner').hidden = true; setupObservers(); }
+    else if (manual) toast('Folder access was not granted');
+    else $('#access-banner').hidden = false;
+    return added;
+  }
+
+  let fsObserver = null;
+  function setupObservers() {
+    // Real-time change events where the browser supports them (Chrome 129+); otherwise polling covers it
+    if (!S.settings.autoScan || !('FileSystemObserver' in window)) return;
+    try {
+      if (!fsObserver) fsObserver = new window.FileSystemObserver(debounce(() => { lastAutoScan = 0; checkForNewMusic(); }, 2500));
+      for (const d of S.dirs) {
+        if (d._observed) continue;
+        d._observed = true;
+        Promise.resolve(fsObserver.observe(d, { recursive: true })).catch(() => { d._observed = false; });
+      }
+    } catch (e) { /* not supported */ }
+  }
+
+  function startWatching() {
+    const tick = () => { if (S.settings.autoScan && document.visibilityState === 'visible') checkForNewMusic(); };
+    document.addEventListener('visibilitychange', tick);
+    window.addEventListener('focus', tick);
+    setInterval(tick, 60000);
+    setupObservers();
   }
 
   function filesFromInput(list) {
@@ -284,15 +358,15 @@
 
   /* Import found files */
   let ingesting = false;
-  async function ingest(items, { quiet = false, root = null } = {}) {
-    if (ingesting) { toast('A scan is already running'); return; }
+  async function ingest(items, { quiet = false, removed = [] } = {}) {
+    if (ingesting) { if (!quiet) toast('A scan is already running'); return; }
     ingesting = true;
-    try { await ingestInner(items, { quiet, root }); } finally { ingesting = false; hideScan(); }
+    try { await ingestInner(items, { quiet, removed }); } finally { ingesting = false; hideScan(); }
     render();
     computeDurations();
     detectCountries();
   }
-  async function ingestInner(items, { quiet, root }) {
+  async function ingestInner(items, { quiet, removed: gone }) {
     const firstImport = S.tracks.size === 0;
     const knownCovers = new Set(await DB.keys('covers'));
     const seen = new Set();
@@ -327,17 +401,13 @@
       done++;
     }
     if (batch.length) await DB.putMany('tracks', batch);
-    // Remove tracks that disappeared from the folder
+    // Remove tracks that were deleted from a watched folder (unless an offline copy exists)
     let removed = 0;
-    if (root) {
-      for (const t of Array.from(S.tracks.values())) {
-        if (t.path.startsWith(root) && !seen.has(t.id)) {
-          const copy = await DB.get('files', t.id);
-          if (!copy) { S.tracks.delete(t.id); DB.del('tracks', t.id); removed++; }
-        }
-      }
+    for (const t of gone || []) {
+      const copy = await DB.get('files', t.id);
+      if (!copy) { S.tracks.delete(t.id); S.handles.delete(t.path); DB.del('tracks', t.id); removed++; }
     }
-    if (fresh.length) toast(`Added ${plural(fresh.length, 'new song')} ✨`);
+    if (fresh.length) toast(`🎵 Added ${plural(fresh.length, 'new song')}`, { label: 'Show', run: () => go('new') });
     else if (!quiet) toast('No new songs found');
     if (removed) toast(`Removed ${plural(removed, 'deleted song')} from the library`);
   }
@@ -808,11 +878,15 @@
     return `<div class="page-head"><h1>${icon('gear')} Settings</h1></div>
       <div class="settings">
         <section class="set-card"><h3>${icon('folder')} Library</h3>
-          <p class="muted">${songs(S.tracks.size)} • ${S.dirs.length ? 'Folders: ' + S.dirs.map((d) => esc(d.name)).join(', ') : 'No folder connected'}</p>
+          <p class="muted">${songs(S.tracks.size)} in your library</p>
+          ${S.dirs.length ? `<div class="folders watched">${S.dirs.map((d, i) => `<div class="frow">${icon('folder')}<div><b>${esc(d.name)}</b><small>${songs(all().filter((t) => t.path.startsWith(d.name + '/')).length)} • watched for new music</small></div><button class="icon-btn" data-act="remove-dir" data-i="${i}" title="Stop watching">${icon('close')}</button></div>`).join('')}</div>` : '<p class="muted small">No folder connected yet.</p>'}
           <div class="btn-row"><button class="btn primary" data-act="add-folder">${icon('folder')} Add folder</button>
+          <button class="btn ghost" data-act="check-new">${icon('refresh')} Check for new music</button>
           <button class="btn ghost" data-act="add-files">${icon('plus')} Add songs</button>
-          ${S.dirs.length ? `<button class="btn ghost" data-act="rescan">${icon('refresh')} Rescan</button>` : ''}
           <button class="btn danger" data-act="clear-lib">${icon('trash')} Clear library</button></div>
+          ${window.showDirectoryPicker
+            ? `<label class="switch"><input type="checkbox" data-set="autoScan" ${st.autoScan ? 'checked' : ''}><span></span><div><b>Automatically add new music</b><small>While Music is open, your folders are checked every minute and every time you come back to the app. Anything you download shows up in Recently Added on its own. Tip: add your <b>Downloads</b> folder too.</small></div></label>`
+            : `<p class="note small">${icon('info')} This browser can't watch folders by itself. After downloading new songs, tap <b>Check for new music</b> and pick the same folder again — only the new songs are added. For fully automatic updates use Chrome or Edge on a computer.</p>`}
           <label class="switch"><input type="checkbox" data-set="keepCopies" ${st.keepCopies ? 'checked' : ''}><span></span><div><b>Keep offline copies in the app</b><small>A copy of newly added songs is stored in the browser, so they still play after you close the app without picking the folder again (handy on phones and iPhone).</small></div></label>
         </section>
         <section class="set-card"><h3>${icon('globe')} Country detection</h3>
@@ -1292,7 +1366,20 @@
           case 'sleep': { const r = act.getBoundingClientRect(); sleepMenu(r.right, r.top - 300); return; }
           case 'add-folder': addFolder(); return;
           case 'add-files': $('#file-input').click(); return;
-          case 'rescan': (async () => { for (const d of S.dirs) { d._scanned = false; } const ok = await ensureDirAccess(true); if (!ok) toast('Folder access was not granted'); })(); return;
+          case 'check-new': checkForNewMusic({ manual: true }); return;
+          case 'remove-dir': {
+            const d = S.dirs[+act.dataset.i];
+            if (!d) return;
+            confirmDialog(`Stop watching "${esc(d.name)}"? Its songs will be removed from the library (the files on your device are not touched).`, async () => {
+              const root = d.name + '/';
+              for (const t of Array.from(S.tracks.values())) if (t.path.startsWith(root)) { S.tracks.delete(t.id); DB.del('tracks', t.id); DB.del('files', t.id); }
+              S.dirs.splice(+act.dataset.i, 1);
+              DB.set('kv', 'dirs', S.dirs);
+              toast(`Stopped watching "${d.name}"`);
+              render();
+            });
+            return;
+          }
           case 'redetect': for (const [k, v] of S.artists) if (!v.manual) S.artists.delete(k); detectCountries({ force: true }); toast('Re-detection started'); return;
           case 'clear-lib': confirmDialog('All songs, covers and offline copies will be removed from the app (your original files are not touched).', async () => {
             await Promise.all(['tracks', 'covers', 'files'].map((s) => DB.clear(s)));
@@ -1362,6 +1449,7 @@
       if (t.dataset.set) {
         S.settings[t.dataset.set] = t.checked; saveSettings();
         if (t.dataset.set === 'online' && t.checked) detectCountries();
+        if (t.dataset.set === 'autoScan' && t.checked) { setupObservers(); checkForNewMusic(); }
         if (t.dataset.set === 'dynamic') applyDynamicColor(S.tracks.get(Player.current));
       }
     });
@@ -1572,6 +1660,7 @@
         b.onclick = async () => { if (await ensureDirAccess(true)) b.hidden = true; };
       }
     }
+    startWatching();
     if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
     computeDurations();
     detectCountries();
