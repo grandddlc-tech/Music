@@ -53,8 +53,13 @@
       node.connect(gainNode); gainNode.connect(analyser); analyser.connect(ctx.destination);
     } catch (e) { console.warn('WebAudio unavailable', e); }
   }
+  /* Audio only goes through Web Audio when the equalizer or visualizer is actually used,
+     so by default the sound reaches the speaker untouched, exactly as loud as the file. */
+  P.wantGraph = () => P.eqGains.some((g) => g !== 0);
+  P.enableGraph = () => ensureGraph();
   P.setEq = (gains) => {
     P.eqGains = gains.slice();
+    if (!ctx && P.wantGraph()) ensureGraph();
     filters.forEach((f, i) => { f.gain.value = gains[i]; });
   };
   P.analyser = () => analyser;
@@ -96,7 +101,7 @@
     return loadIndex(start);
   };
   P.play = async () => {
-    ensureGraph();
+    if (ctx || P.wantGraph()) ensureGraph();
     try { await audio.play(); } catch (e) { /* needs a user gesture */ }
   };
   P.pause = () => audio.pause();
@@ -197,7 +202,7 @@
     if (P.sleepEndOfTrack) { P.sleepEndOfTrack = false; P.dispatchEvent(new Event('sleep')); return; }
     P.next(true);
   });
-  ['play', 'pause', 'timeupdate', 'loadedmetadata', 'volumechange'].forEach((ev) =>
+  ['play', 'pause', 'timeupdate', 'loadedmetadata', 'volumechange', 'seeked'].forEach((ev) =>
     audio.addEventListener(ev, () => P.dispatchEvent(new Event(ev))));
   audio.addEventListener('error', () => {
     if (audio.src) P.dispatchEvent(new CustomEvent('playerror', { detail: P.current }));
@@ -225,5 +230,16 @@
     h('seekto', (d) => P.seek(d.seekTime));
     h('seekbackward', (d) => P.seek(audio.currentTime - (d.seekOffset || 10)));
     h('seekforward', (d) => P.seek(audio.currentTime + (d.seekOffset || 10)));
+    h('stop', () => P.pause());
+    // Seek bar + play state in the phone's media notification
+    const pos = () => {
+      try {
+        ms.playbackState = audio.paused ? 'paused' : 'playing';
+        if (audio.duration && isFinite(audio.duration)) {
+          ms.setPositionState({ duration: audio.duration, playbackRate: audio.playbackRate || 1, position: Math.min(audio.currentTime, audio.duration) });
+        }
+      } catch (e) { /* older browsers */ }
+    };
+    ['play', 'pause', 'seeked', 'loadedmetadata', 'ratechange'].forEach((ev) => audio.addEventListener(ev, pos));
   }
 })();

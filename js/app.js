@@ -49,7 +49,7 @@
     dirs: [],               // FileSystemDirectoryHandle[]
     settings: {
       online: true, keepCopies: !window.showDirectoryPicker, accent: '#8b5cf6', dynamic: true,
-      autoScan: true, theme: 'dark', volume: 0.9, rate: 1, eq: Array(10).fill(0), eqPreset: 'Flat', visualizer: true,
+      autoScan: true, theme: 'dark', volume: 1, rate: 1, eq: Array(10).fill(0), eqPreset: 'Flat', visualizer: true,
     },
     listenSeconds: 0,
     lists: {},              // rendered lists, so rows can be played in context
@@ -117,6 +117,34 @@
     S.tracks.set(track.id, track);
     resolveCountry(track);
     return track;
+  }
+
+  /* Rich media notification (cover art, seek bar, like, previous / play-pause / next, close) */
+  let lastArtId = null, nativeClosed = false;
+  async function coverBase64(cid) {
+    if (!cid) return '';
+    const rec = await DB.get('covers', cid);
+    if (!rec || !rec.blob) return '';
+    return new Promise((res) => {
+      const r = new FileReader();
+      r.onload = () => res(String(r.result).split(',')[1] || '');
+      r.onerror = () => res('');
+      r.readAsDataURL(rec.blob);
+    });
+  }
+  async function notifyNative() {
+    if (!NATIVE) return;
+    const t = S.tracks.get(Player.current);
+    if (!t) return;
+    const a = Player.audio;
+    if (nativeClosed) { if (a.paused) return; nativeClosed = false; lastArtId = null; }
+    const o = {
+      active: true, title: t.title, artist: t.artist, album: t.album || '', playing: !a.paused, liked: !!t.liked,
+      duration: Math.round(((isFinite(a.duration) && a.duration) || t.duration || 0) * 1000),
+      position: Math.round((a.currentTime || 0) * 1000), artId: t.coverId || '',
+    };
+    if (o.artId !== lastArtId) { lastArtId = o.artId; o.art = await coverBase64(t.coverId); }
+    ML.updatePlayback(o).catch(() => {});
   }
 
   /* Bring the app's library in line with every song on the phone */
@@ -1108,7 +1136,10 @@
     }
   }, { rootMargin: '600px' });
 
-  function go(path) { location.hash = '#/' + path; }
+  function go(path, { replace = false } = {}) {
+    if (replace) { history.replaceState(history.state, '', '#/' + path); route(); }
+    else location.hash = '#/' + path;
+  }
 
   /* =========================================================
    * Menus & dialogs
@@ -1291,7 +1322,7 @@
     t.likedAt = t.liked ? Date.now() : 0;
     queueSave(t);
     for (const b of $$(`[data-like-id="${id}"]`)) { b.classList.toggle('on', t.liked); b.innerHTML = icon(t.liked ? 'heart-fill' : 'heart'); }
-    if (Player.current === id) updateNowPlaying();
+    if (Player.current === id) { updateNowPlaying(); notifyNative(); }
     toast(t.liked ? 'Added to Liked Songs ❤️' : 'Removed from Liked Songs');
   }
 
@@ -1401,8 +1432,16 @@
     for (const b of $$('[data-act="mute"]')) b.innerHTML = icon(v === 0 ? 'vol-mute' : v < 0.5 ? 'vol-low' : 'vol');
   }
 
-  function openNP() { $('#np').classList.add('open'); document.body.classList.add('np-open'); startViz(); }
-  function closeNP() { $('#np').classList.remove('open'); document.body.classList.remove('np-open'); }
+  function openNP() {
+    if ($('#np').classList.contains('open')) return;
+    $('#np').classList.add('open'); document.body.classList.add('np-open'); startViz();
+    if (!NATIVE) history.pushState({ np: 1 }, ''); // so the browser's back button closes it
+  }
+  function closeNP(fromHistory) {
+    if (!$('#np').classList.contains('open')) return;
+    $('#np').classList.remove('open'); document.body.classList.remove('np-open');
+    if (!NATIVE && !fromHistory && history.state && history.state.np) history.back();
+  }
   function npTab(name) {
     $$('#np [data-tab]').forEach((b) => b.classList.toggle('on', b.dataset.tab === name));
     $$('#np .np-pane').forEach((p) => p.hidden = p.id !== 'np-' + name);
@@ -1417,6 +1456,7 @@
     cancelAnimationFrame(vizRaf);
     const cv = $('#viz');
     if (!S.settings.visualizer) { cv.hidden = true; return; }
+    Player.enableGraph();
     cv.hidden = false;
     const ctx = cv.getContext('2d');
     const draw = () => {
@@ -1532,7 +1572,7 @@
         }
       }
       const goEl = el.closest('[data-go]');
-      if (goEl) { e.preventDefault(); if (goEl.closest('#np')) closeNP(); go(goEl.dataset.go); closeMenu(); return; }
+      if (goEl) { e.preventDefault(); if (goEl.closest('#np')) closeNP(true); go(goEl.dataset.go); closeMenu(); return; }
 
       // Clicking a song row plays it
       const row = el.closest('.row');
@@ -1588,7 +1628,8 @@
     });
 
     const search = $('#search');
-    const doSearch = debounce(() => go('search/' + encodeURIComponent(search.value)), 250);
+    // Typing replaces the history entry, so Back leaves search in one step
+    const doSearch = debounce(() => go('search/' + encodeURIComponent(search.value), { replace: currentRoute.startsWith('search') }), 250);
     search.addEventListener('input', doSearch);
     search.addEventListener('focus', () => { if (!currentRoute.startsWith('search')) go('search/' + encodeURIComponent(search.value)); });
 
@@ -1644,6 +1685,7 @@
     });
 
     window.addEventListener('hashchange', route);
+    window.addEventListener('popstate', () => { if ($('#np').classList.contains('open') && !(history.state && history.state.np)) closeNP(true); });
     window.addEventListener('online', () => detectCountries());
 
     // Player events
@@ -1760,6 +1802,12 @@
 
     applyTheme();
     matchMedia('(prefers-color-scheme: light)').addEventListener('change', applyTheme);
+    // Phones: play at full volume (the phone's volume buttons control loudness), plain audio path
+    if (!S.settings.soundV2) {
+      S.settings.soundV2 = true;
+      if (NATIVE || matchMedia('(max-width: 860px)').matches) { S.settings.volume = 1; if (NATIVE) S.settings.visualizer = false; }
+      saveSettings();
+    }
     Player.setVolume(S.settings.volume);
     Player.setRate(S.settings.rate || 1);
     Player.eqGains = S.settings.eq.slice();
@@ -1798,18 +1846,34 @@
       try { nativeGranted = !!(await ML.status()).granted; } catch (e) { nativeGranted = false; }
       if (nativeGranted) { startNativeWatch(); syncNative({ quiet: true, force: true }); }
       // Background playback notification with previous / play-pause / next
-      const upd = () => {
-        const t = S.tracks.get(Player.current);
-        if (t) ML.updatePlayback({ active: true, title: t.title, artist: t.artist, playing: !Player.audio.paused }).catch(() => {});
-      };
-      Player.addEventListener('track', upd);
-      Player.addEventListener('play', upd);
-      Player.addEventListener('pause', upd);
-      ML.addListener('mediaAction', ({ action }) => {
+      Player.addEventListener('track', notifyNative);
+      Player.addEventListener('play', notifyNative);
+      Player.addEventListener('pause', notifyNative);
+      Player.addEventListener('seeked', notifyNative);
+      Player.addEventListener('loadedmetadata', notifyNative);
+      ML.addListener('mediaAction', ({ action, position }) => {
         if (action === 'toggle') Player.toggle();
+        else if (action === 'play') Player.play();
+        else if (action === 'pause') Player.pause();
         else if (action === 'next') Player.next();
         else if (action === 'prev') Player.prev();
+        else if (action === 'seek') Player.seek((position || 0) / 1000);
+        else if (action === 'like' && Player.current) toggleLike(Player.current);
+        else if (action === 'close') { Player.pause(); nativeClosed = true; ML.updatePlayback({ active: false }).catch(() => {}); }
       });
+      // Android back button: close what's open, then go back a page, then leave the app running in the background
+      const AppPlugin = window.Capacitor.Plugins.App;
+      if (AppPlugin) {
+        AppPlugin.addListener('backButton', () => {
+          if (!$('#dialog').hidden) return closeDialog();
+          if (!$('#menu').hidden) return closeMenu();
+          if ($('#np').classList.contains('open')) return closeNP();
+          if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+          const h = location.hash.replace(/^#\/?/, '') || 'home';
+          if (h !== 'home') { if (window.history.length > 1) window.history.back(); else go('home', { replace: true }); return; }
+          AppPlugin.minimizeApp();
+        });
+      }
       render();
     } else startWatching();
     if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});

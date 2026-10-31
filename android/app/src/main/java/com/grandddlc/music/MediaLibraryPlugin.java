@@ -5,11 +5,13 @@ import android.content.ContentResolver;
 import android.content.Intent;
 import android.database.ContentObserver;
 import android.database.Cursor;
+import android.graphics.BitmapFactory;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.MediaStore;
+import android.util.Base64;
 
 import androidx.core.content.ContextCompat;
 
@@ -159,7 +161,7 @@ public class MediaLibraryPlugin extends Plugin {
         call.resolve();
     }
 
-    /** Shows / updates / hides the playback notification (keeps music playing in the background). */
+    /** Shows / updates / hides the media notification (keeps music playing in the background). */
     @PluginMethod
     public void updatePlayback(PluginCall call) {
         boolean active = call.getBoolean("active", false);
@@ -169,26 +171,49 @@ public class MediaLibraryPlugin extends Plugin {
             call.resolve();
             return;
         }
-        if (PlaybackService.instance != null) {
-            // Already in the foreground: just refresh the notification (allowed from the background)
-            PlaybackService.instance.update(call.getString("title", ""), call.getString("artist", ""), call.getBoolean("playing", false));
-            call.resolve();
-            return;
+        PlaybackService.NowPlaying st = PlaybackService.STATE;
+        st.title = call.getString("title", "");
+        st.artist = call.getString("artist", "");
+        st.album = call.getString("album", "");
+        st.playing = call.getBoolean("playing", false);
+        st.liked = call.getBoolean("liked", false);
+        st.duration = call.getLong("duration", 0L);
+        st.position = call.getLong("position", 0L);
+        String art = call.getString("art");
+        if (art != null) {
+            // Cover art changed ("" = no cover)
+            st.art = null;
+            if (!art.isEmpty()) {
+                try {
+                    byte[] bytes = Base64.decode(art, Base64.DEFAULT);
+                    st.art = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+                } catch (Exception ignored) { }
+            }
         }
-        i.setAction(PlaybackService.ACTION_UPDATE);
-        i.putExtra("title", call.getString("title", ""));
-        i.putExtra("artist", call.getString("artist", ""));
-        i.putExtra("playing", call.getBoolean("playing", false));
-        try {
-            ContextCompat.startForegroundService(getContext(), i);
-        } catch (Exception ignored) { }
+        if (PlaybackService.instance != null) {
+            // Already running: refresh in place (allowed from the background)
+            PlaybackService.instance.refresh();
+        } else {
+            i.setAction(PlaybackService.ACTION_UPDATE);
+            try {
+                ContextCompat.startForegroundService(getContext(), i);
+            } catch (Exception ignored) { }
+        }
         call.resolve();
     }
 
-    /** Called by the notification buttons. */
+    /** Called by the notification buttons and headphone / Bluetooth buttons. */
     void sendMediaAction(String action) {
         JSObject r = new JSObject();
         r.put("action", action);
+        notifyListeners("mediaAction", r);
+    }
+
+    /** Called when the user drags the seek bar in the notification. */
+    void sendSeek(long positionMs) {
+        JSObject r = new JSObject();
+        r.put("action", "seek");
+        r.put("position", positionMs);
         notifyListeners("mediaAction", r);
     }
 
