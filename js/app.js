@@ -56,6 +56,116 @@
   };
   window.MusicState = S;
 
+  /* =========================================================
+   * Android app: the phone's whole music library (MediaStore)
+   * ========================================================= */
+  const NATIVE = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+  const ML = NATIVE ? window.Capacitor.Plugins.MediaLibrary : null;
+  let nativeGranted = false, nativeSyncing = false, nativeQueued = null, lastNativeSync = 0, nativeWatching = false;
+  const nativeUrl = (path) => window.Capacitor.convertFileSrc(path);
+  const shortPath = (p) => String(p || '').replace(/^\/storage\/emulated\/\d+\//, '').replace(/^\/storage\/[^/]+\//, 'SD card/');
+
+  async function nativeRequestAccess() {
+    let r = { granted: false };
+    try { r = await ML.requestAccess(); } catch (e) { /* denied */ }
+    nativeGranted = !!r.granted;
+    if (nativeGranted) { startNativeWatch(); await syncNative({ quiet: false, force: true }); }
+    else toast('Music needs permission to read your songs', { label: 'Try again', run: nativeRequestAccess });
+    render();
+  }
+
+  function startNativeWatch() {
+    if (nativeWatching) return;
+    nativeWatching = true;
+    ML.watch().catch(() => {});
+    // Android tells us whenever a song is downloaded, changed or deleted anywhere on the phone
+    ML.addListener('libraryChanged', () => syncNative({ quiet: true, force: true }));
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') syncNative({ quiet: true }); });
+  }
+
+  async function importNative(m, knownCovers) {
+    const path = m.path || '';
+    const name = path.split('/').pop() || 'song';
+    const folder = path.split('/').slice(-2, -1)[0] || '';
+    const C = Scanner.cleanName;
+    const album = C(m.album);
+    const fallback = {
+      title: C(m.title), artist: C(m.artist),
+      album: album && album.toLowerCase() !== folder.toLowerCase() ? album : '', // Android uses the folder name when there's no album tag
+      year: m.year || null, trackNo: m.track ? m.track % 1000 : null, size: m.size,
+    };
+    // Read just the start of the file for tags & cover art (where MP3 tags live)
+    let blob = null;
+    try {
+      const res = await fetch(nativeUrl(path), { headers: { Range: 'bytes=0-2097151' } });
+      if (res.ok) blob = await res.blob();
+    } catch (e) { /* unreadable: fall back to Android's metadata */ }
+    const file = new File(blob ? [blob] : [], name, { type: m.mime || '' });
+    const { track, cover } = await Scanner.parse(file, shortPath(path), fallback);
+    track.id = 'a' + m.id;
+    track.native = true;
+    track.nativePath = path;
+    track.size = m.size || track.size;
+    track.addedAt = m.dateAdded ? m.dateAdded * 1000 : Date.now();
+    track.duration = (m.duration || 0) / 1000;
+    track.plays = 0; track.liked = false;
+    const albumKey = track.album ? Country.norm((track.albumArtist || Country.primaryArtist(track.artist)) + '|' + track.album) : null;
+    const cid = albumKey ? 'c' + hash(albumKey).toString(36) : (cover ? 'c' + track.id : null);
+    if (cover && cid && !knownCovers.has(cid)) { await DB.set('covers', cid, cover); knownCovers.add(cid); }
+    track.coverId = cid && knownCovers.has(cid) ? cid : null;
+    track.guess = Country.guessFromText(track);
+    S.tracks.set(track.id, track);
+    resolveCountry(track);
+    return track;
+  }
+
+  /* Bring the app's library in line with every song on the phone */
+  async function syncNative({ quiet = true, force = false } = {}) {
+    if (!NATIVE || !nativeGranted) return;
+    if (nativeSyncing) { nativeQueued = { quiet: quiet && (!nativeQueued || nativeQueued.quiet), force: true }; return; }
+    if (!force && Date.now() - lastNativeSync < 10000) return;
+    nativeSyncing = true;
+    lastNativeSync = Date.now();
+    try {
+      const { songs: list } = await ML.getSongs();
+      const ids = new Set();
+      const fresh = [];
+      for (const m of list) {
+        const id = 'a' + m.id;
+        ids.add(id);
+        const t = S.tracks.get(id);
+        if (!t) fresh.push(m);
+        else if (t.nativePath !== m.path) { t.nativePath = m.path; t.path = shortPath(m.path); queueSave(t); }
+      }
+      let removed = 0;
+      for (const t of Array.from(S.tracks.values())) {
+        if (t.native && !ids.has(t.id)) { S.tracks.delete(t.id); DB.del('tracks', t.id); removed++; }
+      }
+      const knownCovers = new Set(await DB.keys('covers'));
+      const batch = [];
+      let done = 0;
+      for (const m of fresh) {
+        if (fresh.length > 3 || !quiet) showScan(`Reading "${(m.path || '').split('/').pop()}"`, done, fresh.length);
+        const t = await importNative(m, knownCovers);
+        batch.push([t.id, t]);
+        if (batch.length >= 25) { await DB.putMany('tracks', batch.splice(0)); softRefresh(); }
+        done++;
+      }
+      if (batch.length) await DB.putMany('tracks', batch);
+      hideScan();
+      if (fresh.length) toast(`🎵 Added ${plural(fresh.length, 'new song')}`, { label: 'Show', run: () => go('new') });
+      else if (!quiet) toast('Your library is up to date');
+      if (removed) toast(`Removed ${plural(removed, 'deleted song')} from the library`);
+      if (fresh.length || removed) { render(); detectCountries(); }
+    } catch (e) {
+      hideScan();
+      if (!quiet) toast("Couldn't read the music on this phone");
+    } finally {
+      nativeSyncing = false;
+      if (nativeQueued) { const q = nativeQueued; nativeQueued = null; syncNative(q); }
+    }
+  }
+
   const saveSettings = debounce(() => DB.set('kv', 'settings', S.settings), 300);
   const saveArtists = debounce(() => DB.set('kv', 'artists', Array.from(S.artists.entries())), 800);
   const savePlaylists = () => DB.set('kv', 'playlists', Array.from(S.playlists.values()));
@@ -207,6 +317,8 @@
    * File access
    * ========================================================= */
   async function resolveUrl(id) {
+    const nt = S.tracks.get(id);
+    if (nt && nt.native) return nativeUrl(nt.nativePath);
     let f = S.files.get(id);
     if (!f) {
       const stored = await DB.get('files', id);
@@ -238,6 +350,7 @@
   }
 
   async function addFolder() {
+    if (NATIVE) return checkForNewMusic({ manual: true });
     if (window.showDirectoryPicker) {
       try {
         const d = await window.showDirectoryPicker({ id: 'music', mode: 'read' });
@@ -281,6 +394,10 @@
   /* ---------- Watching folders for new music ---------- */
   let autoScanning = false, lastAutoScan = 0;
   async function checkForNewMusic({ manual = false } = {}) {
+    if (NATIVE) {
+      if (!nativeGranted) { if (manual) nativeRequestAccess(); return 0; }
+      return syncNative({ quiet: !manual, force: manual });
+    }
     if (autoScanning || ingesting) return 0;
     if (!S.dirs.length) {
       if (manual) { if (window.showDirectoryPicker) addFolder(); else $('#dir-input').click(); }
@@ -564,6 +681,17 @@
   const views = {};
 
   function emptyState() {
+    if (NATIVE) {
+      return `<div class="empty-state">
+      <div class="empty-art"><div class="disc"></div></div>
+      <h1>Welcome to Music 🎧</h1>
+      <p>Allow access and Music will find <b>every song on your phone</b>, pull out the cover art and details, and work out which country each song is from. Anything you download later shows up on its own.</p>
+      <div class="empty-actions">
+        <button class="btn primary big" data-act="native-access">${icon('folder')} Allow access to my music</button>
+      </div>
+      <p class="hint">Your songs stay on your phone. Nothing is uploaded.</p>
+    </div>`;
+    }
     return `<div class="empty-state">
       <div class="empty-art"><div class="disc"></div></div>
       <h1>Welcome to Music 🎧</h1>
@@ -877,7 +1005,11 @@
     for (const t of S.tracks.values()) srcStats[t.countrySource] = (srcStats[t.countrySource] || 0) + 1;
     return `<div class="page-head"><h1>${icon('gear')} Settings</h1></div>
       <div class="settings">
-        <section class="set-card"><h3>${icon('folder')} Library</h3>
+        ${NATIVE ? `<section class="set-card"><h3>${icon('folder')} Library</h3>
+          <p class="muted">${songs(S.tracks.size)} from this phone</p>
+          <p class="note small">${icon('info')} ${nativeGranted ? 'Music reads every song on this phone and adds new downloads automatically — no need to pick folders.' : 'Music needs permission to read the songs on this phone.'}</p>
+          <div class="btn-row">${nativeGranted ? `<button class="btn primary" data-act="check-new">${icon('refresh')} Rescan phone</button>` : `<button class="btn primary" data-act="native-access">${icon('folder')} Allow access</button>`}</div>
+        </section>` : `<section class="set-card"><h3>${icon('folder')} Library</h3>
           <p class="muted">${songs(S.tracks.size)} in your library</p>
           ${S.dirs.length ? `<div class="folders watched">${S.dirs.map((d, i) => `<div class="frow">${icon('folder')}<div><b>${esc(d.name)}</b><small>${songs(all().filter((t) => t.path.startsWith(d.name + '/')).length)} • watched for new music</small></div><button class="icon-btn" data-act="remove-dir" data-i="${i}" title="Stop watching">${icon('close')}</button></div>`).join('')}</div>` : '<p class="muted small">No folder connected yet.</p>'}
           <div class="btn-row"><button class="btn primary" data-act="add-folder">${icon('folder')} Add folder</button>
@@ -888,7 +1020,7 @@
             ? `<label class="switch"><input type="checkbox" data-set="autoScan" ${st.autoScan ? 'checked' : ''}><span></span><div><b>Automatically add new music</b><small>While Music is open, your folders are checked every minute and every time you come back to the app. Anything you download shows up in Recently Added on its own. Tip: add your <b>Downloads</b> folder too.</small></div></label>`
             : `<p class="note small">${icon('info')} This browser can't watch folders by itself. After downloading new songs, tap <b>Check for new music</b> and pick the same folder again — only the new songs are added. For fully automatic updates use Chrome or Edge on a computer.</p>`}
           <label class="switch"><input type="checkbox" data-set="keepCopies" ${st.keepCopies ? 'checked' : ''}><span></span><div><b>Keep offline copies in the app</b><small>A copy of newly added songs is stored in the browser, so they still play after you close the app without picking the folder again (handy on phones and iPhone).</small></div></label>
-        </section>
+        </section>`}
         <section class="set-card"><h3>${icon('globe')} Country detection</h3>
           <p class="muted">${Object.entries(srcStats).map(([k, v]) => `${SOURCE_LABEL[k] || k}: ${num(v)}`).join(' • ') || '—'}</p>
           <label class="switch"><input type="checkbox" data-set="online" ${st.online ? 'checked' : ''}><span></span><div><b>Look up artists on MusicBrainz</b><small>For artists not in the built-in database, the country is looked up in the free MusicBrainz music encyclopedia (only the artist name is sent).</small></div></label>
@@ -1367,6 +1499,7 @@
           case 'add-folder': addFolder(); return;
           case 'add-files': $('#file-input').click(); return;
           case 'check-new': checkForNewMusic({ manual: true }); return;
+          case 'native-access': nativeRequestAccess(); return;
           case 'remove-dir': {
             const d = S.dirs[+act.dataset.i];
             if (!d) return;
@@ -1660,13 +1793,31 @@
         b.onclick = async () => { if (await ensureDirAccess(true)) b.hidden = true; };
       }
     }
-    startWatching();
+    if (NATIVE) {
+      document.body.classList.add('native');
+      try { nativeGranted = !!(await ML.status()).granted; } catch (e) { nativeGranted = false; }
+      if (nativeGranted) { startNativeWatch(); syncNative({ quiet: true, force: true }); }
+      // Background playback notification with previous / play-pause / next
+      const upd = () => {
+        const t = S.tracks.get(Player.current);
+        if (t) ML.updatePlayback({ active: true, title: t.title, artist: t.artist, playing: !Player.audio.paused }).catch(() => {});
+      };
+      Player.addEventListener('track', upd);
+      Player.addEventListener('play', upd);
+      Player.addEventListener('pause', upd);
+      ML.addListener('mediaAction', ({ action }) => {
+        if (action === 'toggle') Player.toggle();
+        else if (action === 'next') Player.next();
+        else if (action === 'prev') Player.prev();
+      });
+      render();
+    } else startWatching();
     if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
     computeDurations();
     detectCountries();
   }
 
-  if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+  if ('serviceWorker' in navigator && location.protocol.startsWith('http') && !NATIVE) {
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
   document.addEventListener('DOMContentLoaded', init);

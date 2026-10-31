@@ -708,3 +708,6 @@ body.dropping .drop-hint {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* Android app: no folder picking needed */
+body.native .add-btn, body.native .top-add { display: none !important; }

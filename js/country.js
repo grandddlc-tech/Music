@@ -76,7 +76,7 @@
   /* Split the main artist from feat. etc. */
   C.splitArtists = (artist) => {
     const s = String(artist || '').replace(/\(.*?(feat|ft|with)\.?.*?\)/ig, '');
-    return s.split(/\s*(?:,|;|\/|&|\+| x | X |\bfeat\.?|\bft\.?|\bfeaturing\b|\bwith\b| و | ft |،|Feat\.?|Ft\.?)\s*/)
+    return s.split(/\s*(?:,|;|\/|&|\+| x | X |\bfeat\.?|\bft\.?|\bfeaturing\b|\bwith\b| and | And | و | ft |،|Feat\.?|Ft\.?)\s*/)
       .map((x) => x.trim()).filter(Boolean);
   };
   C.primaryArtist = (artist) => C.splitArtists(artist)[0] || String(artist || '').trim();

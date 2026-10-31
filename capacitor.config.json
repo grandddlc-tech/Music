@@ -1,0 +1,8 @@
+{
+  "appId": "com.grandddlc.music",
+  "appName": "Music",
+  "webDir": "www",
+  "android": {
+    "backgroundColor": "#0b0b12"
+  }
+}

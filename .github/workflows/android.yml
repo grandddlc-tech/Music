@@ -1,0 +1,85 @@
+name: Build Android app
+
+on:
+  push:
+    branches: [main, ccr-c79c0740-c858hv]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Copy the web app into the Android project
+        run: npm run build:web && npx cap sync android
+
+      # Signing key: taken from the repository secrets if you add them
+      # (MUSIC_KEYSTORE_BASE64 + MUSIC_KEYSTORE_PASSWORD); otherwise one is generated once and
+      # kept in the Actions cache, so it never appears in the repository.
+      - name: Restore signing key
+        id: keycache
+        uses: actions/cache@v4
+        with:
+          path: ~/.music-signing
+          key: music-signing-key-v1
+
+      - name: Prepare signing key
+        env:
+          KEY_B64: ${{ secrets.MUSIC_KEYSTORE_BASE64 }}
+          KEY_PASS: ${{ secrets.MUSIC_KEYSTORE_PASSWORD }}
+        run: |
+          mkdir -p ~/.music-signing
+          if [ -n "$KEY_B64" ]; then
+            echo "$KEY_B64" | base64 -d > ~/.music-signing/release.jks
+            echo "$KEY_PASS" > ~/.music-signing/pass
+          elif [ ! -f ~/.music-signing/release.jks ]; then
+            openssl rand -hex 24 > ~/.music-signing/pass
+            keytool -genkeypair -keystore ~/.music-signing/release.jks -alias music -keyalg RSA -keysize 2048 \
+              -validity 10000 -storepass "$(cat ~/.music-signing/pass)" -keypass "$(cat ~/.music-signing/pass)" \
+              -dname "CN=Music"
+          fi
+          echo "MUSIC_KEYSTORE=$HOME/.music-signing/release.jks" >> "$GITHUB_ENV"
+          echo "::add-mask::$(cat ~/.music-signing/pass)"
+          echo "MUSIC_KEYSTORE_PASSWORD=$(cat ~/.music-signing/pass)" >> "$GITHUB_ENV"
+
+      - name: Build APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon --stacktrace
+
+      - name: Rename APK
+        run: cp android/app/build/outputs/apk/release/app-release.apk Music.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Music-apk
+          path: Music.apk
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.${{ github.run_number }}
+          name: Music 1.${{ github.run_number }}
+          target_commitish: ${{ github.sha }}
+          make_latest: true
+          files: Music.apk
+          body: |
+            Download **Music.apk** below and open it on your Android phone to install (or update) the app.

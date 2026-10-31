@@ -47,11 +47,39 @@
     });
   }
 
+  /* Many Persian/Arabic MP3s store tags in Windows-1256 but declare Latin-1, which shows up as
+     gibberish like "ãÍÓä íÑÇäå". Re-decode those so they read correctly. */
+  let dec1256;
+  try { dec1256 = new TextDecoder('windows-1256'); } catch (e) { dec1256 = null; }
+  function fixMojibake(s) {
+    if (!dec1256 || !/[\u00C0-\u00FF]{2}/.test(s) || /[^\u0000-\u00FF]/.test(s)) return s;
+    const bytes = Uint8Array.from(s, (c) => c.charCodeAt(0));
+    const out = dec1256.decode(bytes);
+    const arabic = (out.match(/[\u0600-\u06FF]/g) || []).length;
+    return arabic >= Math.max(2, out.replace(/[\s\d\W_]/g, '').length * 0.5) ? out : s;
+  }
+
   function cleanStr(v) {
     if (v == null) return '';
     if (typeof v === 'object') v = v.data || v.text || '';
-    return String(v).replace(/\u0000/g, '').trim();
+    return fixMojibake(String(v).replace(/\u0000/g, '').trim());
   }
+
+  /* Remove download-site spam such as "~ Music-Fa.Com", "[BibakMusic.com]", "@channel" and underscores */
+  S.cleanName = (v) => {
+    const raw = String(v || '');
+    if (/^<unknown>$/i.test(raw.trim())) return '';
+    const s = raw
+      .replace(/[\[(【{]?\s*(?:https?:\/\/)?(?:www\.)?[\w-]+(?:\.[\w-]+)*\.(?:com|ir|net|org|info|co|me|xyz|tv|fm|top|site|online|music|app)\b[^\])】}]*[\])】}]?/gi, ' ')
+      .replace(/(^|\s)@[\w.]+/g, ' ')
+      .replace(/_+/g, ' ')
+      .replace(/\s*[~|•]\s*$/g, '').replace(/^\s*[~|•]\s*/g, '')
+      .replace(/\(\s*\)|\[\s*\]/g, ' ')
+      .replace(/^[\s\-–—.~]+|[\s\-–—.~]+$/g, '')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+    return s || raw.trim();
+  };
 
   /* No tags? Guess from the file name: "Artist - Title" */
   function fromFilename(path) {
@@ -98,20 +126,21 @@
   }
 
   /* Extract all metadata from a file */
-  S.parse = async (file, path) => {
+  S.parse = async (file, path, fallback = {}) => {
     const tags = await readTags(file);
     const fn = fromFilename(path);
+    const C = S.cleanName;
     const track = {
-      title: cleanStr(tags.title) || fn.title,
-      artist: cleanStr(tags.artist) || fn.artist || 'Unknown Artist',
-      album: cleanStr(tags.album) || '',
+      title: C(cleanStr(tags.title) || fallback.title || fn.title) || fn.title,
+      artist: C(cleanStr(tags.artist) || fallback.artist || fn.artist) || 'Unknown Artist',
+      album: C(cleanStr(tags.album) || fallback.album || ''),
       albumArtist: cleanStr(tags.TPE2 && tags.TPE2.data) || '',
       genre: cleanStr(tags.genre).replace(/^\((\d+)\)/, ''),
-      year: parseInt(cleanStr(tags.year), 10) || null,
-      trackNo: parseInt(cleanStr(tags.track), 10) || null,
+      year: parseInt(cleanStr(tags.year), 10) || fallback.year || null,
+      trackNo: parseInt(cleanStr(tags.track), 10) || fallback.trackNo || null,
       lyrics: '',
       path,
-      size: file.size,
+      size: fallback.size || file.size,
       mtime: file.lastModified || Date.now(),
       type: file.type || '',
     };
