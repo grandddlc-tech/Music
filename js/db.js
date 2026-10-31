@@ -1,6 +1,6 @@
-/* لایه‌ی ذخیره‌سازی IndexedDB */
+/* IndexedDB storage layer */
 (function () {
-  const NAME = 'avaz-music';
+  const NAME = 'music-app';
   const VERSION = 1;
   const STORES = ['tracks', 'covers', 'files', 'artists', 'playlists', 'kv'];
   let dbp;

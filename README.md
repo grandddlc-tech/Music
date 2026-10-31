@@ -1,68 +1,68 @@
-# 🎧 آوا — موزیک‌های من
+# 🎧 Music
 
-اپلیکیشن موسیقی شخصی و زیبا که به همه‌ی آهنگ‌های دستگاهت دسترسی داره و **کشور هر آهنگ رو خودش تشخیص می‌ده**.
-همه‌چیز روی دستگاه خودت اجرا می‌شه؛ هیچ آهنگی آپلود نمی‌شه.
+A beautiful personal music player that reads your whole music library and **works out which country every song is from — automatically**.
+Everything runs on your own device; your songs are never uploaded.
 
-## اجرا
+## Running it
 
-اپ کاملاً استاتیکه و نیازی به نصب یا build نداره:
+It's a static web app — no install or build step:
 
 ```bash
 python3 -m http.server 8000
-# بعد در مرورگر: http://localhost:8000
+# then open http://localhost:8000
 ```
 
-یا روی **GitHub Pages** منتشرش کن (Settings → Pages → Branch) تا روی گوشی هم باز بشه و بتونی مثل یک اپ واقعی **نصبش** کنی (PWA).
+Or publish it with **GitHub Pages** (Settings → Pages → Branch) so it opens on your phone too, where you can **install** it like a native app (PWA).
 
-بعد از باز شدن، روی «انتخاب پوشه‌ی موزیک» بزن یا پوشه رو بکش و داخل صفحه رها کن.
+Once it's open, click **Choose music folder**, or drag a folder onto the page.
 
-## تشخیص کشور چطور کار می‌کنه؟
+## How country detection works
 
-برای هر آهنگ، به این ترتیب بررسی می‌شه:
+Each song is checked in this order:
 
-1. **انتخاب خودت** — اگه کشوری رو دستی عوض کرده باشی (برای یک آهنگ یا همه‌ی آهنگ‌های یک خواننده).
-2. **پایگاه داده‌ی داخلی آوا** — بیش از ۴۰۰۰ نام خواننده (فارسی و لاتین) از ۱۰۰ کشور؛ از ابی و گوگوش تا BTS و Tarkan و Shakira.
-3. **MusicBrainz** — برای خواننده‌های ناشناخته، کشورشون از دانشنامه‌ی آزاد موسیقی پرسیده می‌شه (فقط نام خواننده ارسال می‌شه؛ قابل خاموش کردن).
-4. **تحلیل متن** — خط نوشتاری (فارسی، عربی، اردو، کره‌ای، ژاپنی، سیریلیک، یونانی، …)، حروف خاص زبان‌ها (ترکی، ویتنامی، لهستانی، …)، ژانر (K-Pop، Bandari، Reggaeton، …)، نام پوشه و کلمات فینگلیش.
+1. **Your choice** — if you changed the country by hand (for one song, or for every song by an artist).
+2. **Built-in database** — about 4,600 artist names (Latin and native scripts) from 100+ countries, from Googoosh and Ebi to BTS, Tarkan and Shakira.
+3. **MusicBrainz** — artists not in the database are looked up in the free MusicBrainz music encyclopedia (only the artist name is sent; can be turned off).
+4. **Text analysis** — the writing script (Persian, Arabic, Urdu, Korean, Japanese, Cyrillic, Greek, …), language-specific letters (Turkish, Vietnamese, Polish, …), genre tags (K-Pop, Bandari, Reggaeton, …), folder names and common words.
 
-دلیل تشخیص هر آهنگ در «اطلاعات آهنگ» نمایش داده می‌شه، و با زدن روی پرچم هر آهنگ می‌تونی اصلاحش کنی.
+The reason behind each detection is shown in **Song info**, and you can correct any song by clicking its flag.
 
-## امکانات
+## Features
 
-- 🏠 **خانه** با تازه‌ها، کشورها، میکس‌های کشوری، اخیراً شنیده‌شده، محبوب‌ترین‌ها و خواننده‌ها
-- ✨ **تازه اضافه‌شده‌ها** — دسته‌بندی بر اساس امروز / این هفته / این ماه / قدیمی‌تر + آلبوم‌های تازه
-- 🌍 **کشورها** — نمودار توزیع، کارت هر کشور با پرچم، صفحه‌ی هر کشور با خواننده‌ها، آلبوم‌ها و آهنگ‌ها
-- 📚 **کتابخانه** — آهنگ‌ها (با مرتب‌سازی)، خواننده‌ها، آلبوم‌ها، ژانرها، پوشه‌ها
-- 🎵 **پلی‌لیست‌ها** — پسندیده‌ها، پلی‌لیست‌های هوشمند (بیشترین پخش، اخیراً پخش‌شده، کشف دوباره، تازه‌های ماه) و پلی‌لیست‌های خودت + خروجی M3U
-- 🔎 **جستجو** در عنوان، خواننده، آلبوم، ژانر و نام کشور (فارسی/انگلیسی)
-- ▶️ **پخش‌کننده** — صف قابل جابجایی، پخش بعدی، تصادفی، تکرار (همه/یکی)، ادامه از جای قبلی
-- 🖼️ **صفحه‌ی در حال پخش** با رنگ پویا از کاور، ویژوالایزر، متن آهنگ (از تگ فایل)
-- 🎚️ **اکولایزر ۱۰ باند** با پریست‌ها (باس قوی، پاپ، راک، وکال، سنتی، …) و **سرعت پخش**
-- 🌙 **تایمر خواب** (با کم شدن تدریجی صدا یا پایان آهنگ)
-- 📊 **آمار** — آهنگ‌ها و شنیده‌ها بر اساس کشور، خواننده‌های برتر، دهه‌ها، ژانرها، زمان گوش دادن
-- 🎨 تم تیره/روشن/خودکار، رنگ دلخواه، طراحی راست‌چین با فونت وزیرمتن، کاملاً واکنش‌گرا برای موبایل
-- 🔒 کنترل از صفحه‌ی قفل و هدفون (Media Session)، میانبرهای صفحه‌کلید، کشیدن و رها کردن فایل
-- 💾 کار آفلاین (PWA)، ذخیره‌ی آفلاین آهنگ‌ها داخل اپ (مناسب آیفون)، پشتیبان‌گیری و بازیابی
+- 🏠 **Home** — recently added, countries, per-country mixes, recently played, top songs and artists
+- ✨ **Recently Added** — grouped into today / this week / this month / older, plus new albums
+- 🌍 **Countries** — distribution bar, a flag card per country, and a page for each country with its artists, albums and songs
+- 📚 **Library** — songs (sortable), artists, albums, genres, folders
+- 🎵 **Playlists** — Liked Songs, smart playlists (Most Played, Recently Played, Rediscover, New This Month) and your own playlists, with M3U export
+- 🔎 **Search** across titles, artists, albums, genres and country names
+- ▶️ **Player** — reorderable queue, play next, shuffle, repeat (all/one), resume where you left off
+- 🖼️ **Now Playing** screen with colours taken from the cover art, a visualizer and embedded lyrics
+- 🎚️ **10-band equalizer** with presets and **playback speed**
+- 🌙 **Sleep timer** (gentle fade-out, or stop at the end of the song)
+- 📊 **Stats** — songs and plays by country, top artists, decades, genres, time listened
+- 🎨 Dark / light / auto theme, custom accent colour, fully responsive for phones
+- 🔒 Lock-screen & headphone controls (Media Session), keyboard shortcuts, drag & drop
+- 💾 Works offline (PWA), optional offline copies inside the app (great on iPhone), backup & restore
 
-## فرمت‌ها
+## Formats
 
-MP3، M4A/AAC، FLAC، OGG/Opus، WAV و هر فرمتی که مرورگر پخش کنه. تگ‌ها (عنوان، خواننده، آلبوم، ژانر، سال، کاور، متن آهنگ) با [jsmediatags](https://github.com/aadsm/jsmediatags) خونده می‌شن؛ اگه فایل تگ نداشت، از اسم فایل («خواننده - عنوان») استفاده می‌شه.
+MP3, M4A/AAC, FLAC, OGG/Opus, WAV and anything else your browser can play. Tags (title, artist, album, genre, year, cover art, lyrics) are read with [jsmediatags](https://github.com/aadsm/jsmediatags); files without tags fall back to the file name (`Artist - Title`).
 
-## مرورگرها
+## Browsers
 
-- **Chrome / Edge (دسکتاپ و اندروید):** بهترین تجربه؛ پوشه یک بار انتخاب می‌شه و به خاطر سپرده می‌شه.
-- **Safari / iPhone / Firefox:** آهنگ‌ها رو انتخاب کن؛ گزینه‌ی «ذخیره‌ی آفلاین داخل اپ» به‌صورت پیش‌فرض روشنه تا دفعه‌ی بعد نیاز به انتخاب دوباره نباشه.
+- **Chrome / Edge (desktop & Android):** best experience — you pick the folder once and it's remembered.
+- **Safari / iPhone / Firefox:** pick your songs; "Keep offline copies in the app" is on by default so you don't have to pick them again next time.
 
-## ساختار
+## Project layout
 
 ```
-index.html            رابط کاربری
-css/style.css         طراحی
-js/app.js             منطق اپ و صفحه‌ها
-js/country.js         موتور تشخیص کشور
-js/artists.js         پایگاه داده‌ی خواننده‌ها → کشور
-js/scanner.js         خواندن فایل‌ها، تگ‌ها و کاور
-js/player.js          پخش، صف، اکولایزر، تایمر خواب
-js/db.js              ذخیره‌سازی IndexedDB
-sw.js                 اجرای آفلاین
+index.html            UI shell
+css/style.css         styles
+js/app.js             app logic and views
+js/country.js         country detection engine
+js/artists.js         artist → country database
+js/scanner.js         file, tag and cover-art reading
+js/player.js          playback, queue, equalizer, sleep timer
+js/db.js              IndexedDB storage
+sw.js                 offline support
 ```

@@ -1,10 +1,10 @@
 <!doctype html>
-<html lang="fa" dir="rtl" data-theme="dark">
+<html lang="en" dir="ltr" data-theme="dark">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>آوا — موزیک‌های من</title>
-  <meta name="description" content="پخش‌کننده‌ی موسیقی شخصی با تشخیص خودکار کشور هر آهنگ">
+  <title>Music</title>
+  <meta name="description" content="Your personal music player that detects the country of every song">
   <meta name="theme-color" content="#0b0b12">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
@@ -13,11 +13,11 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;700;800;900&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-  <!-- آیکون‌ها -->
+  <!-- Icons -->
   <svg width="0" height="0" style="position:absolute" aria-hidden="true">
     <defs>
       <symbol id="i-play" viewBox="0 0 24 24"><path fill="currentColor" stroke="none" d="M8 5.5v13a1 1 0 0 0 1.5.86l10.4-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z"/></symbol>
@@ -31,6 +31,7 @@
       <symbol id="i-heart-fill" viewBox="0 0 24 24"><path fill="currentColor" d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></symbol>
       <symbol id="i-more" viewBox="0 0 24 24"><circle fill="currentColor" cx="5" cy="12" r="1.6"/><circle fill="currentColor" cx="12" cy="12" r="1.6"/><circle fill="currentColor" cx="19" cy="12" r="1.6"/></symbol>
       <symbol id="i-chev-left" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+      <symbol id="i-chev-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
       <symbol id="i-chev-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
       <symbol id="i-sparkle" viewBox="0 0 24 24"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></symbol>
       <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></symbol>
@@ -73,90 +74,90 @@
   <div class="bg-glow" aria-hidden="true"></div>
 
   <div class="app">
-    <!-- نوار کناری -->
+    <!-- Sidebar -->
     <aside class="sidebar">
       <a class="brand" href="#/home">
         <span class="logo"><svg viewBox="0 0 48 48"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#a78bfa"/><stop offset="1" stop-color="#ec4899"/></linearGradient></defs><rect width="48" height="48" rx="14" fill="url(#lg)"/><path d="M14 30c3-9 5-14 6-14s2 16 4 16 3-12 5-12 2 7 5 7" stroke="#fff" stroke-width="3.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
-        <span class="brand-name">آوا</span>
+        <span class="brand-name">Music</span>
       </a>
       <nav class="nav">
-        <a href="#/home" data-route="home"><svg class="ic"><use href="#i-home"/></svg><span>خانه</span></a>
-        <a href="#/search" data-route="search"><svg class="ic"><use href="#i-search"/></svg><span>جستجو</span></a>
-        <a href="#/new" data-route="new"><svg class="ic"><use href="#i-sparkle"/></svg><span>تازه‌ها</span></a>
-        <a href="#/countries" data-route="countries"><svg class="ic"><use href="#i-globe"/></svg><span>کشورها</span></a>
-        <a href="#/library" data-route="library"><svg class="ic"><use href="#i-library"/></svg><span>کتابخانه</span></a>
-        <a href="#/playlists" data-route="playlists"><svg class="ic"><use href="#i-list"/></svg><span>پلی‌لیست‌ها</span></a>
-        <a href="#/stats" data-route="stats"><svg class="ic"><use href="#i-chart"/></svg><span>آمار</span></a>
-        <a href="#/settings" data-route="settings"><svg class="ic"><use href="#i-gear"/></svg><span>تنظیمات</span></a>
+        <a href="#/home" data-route="home"><svg class="ic"><use href="#i-home"/></svg><span>Home</span></a>
+        <a href="#/search" data-route="search"><svg class="ic"><use href="#i-search"/></svg><span>Search</span></a>
+        <a href="#/new" data-route="new"><svg class="ic"><use href="#i-sparkle"/></svg><span>New</span></a>
+        <a href="#/countries" data-route="countries"><svg class="ic"><use href="#i-globe"/></svg><span>Countries</span></a>
+        <a href="#/library" data-route="library"><svg class="ic"><use href="#i-library"/></svg><span>Library</span></a>
+        <a href="#/playlists" data-route="playlists"><svg class="ic"><use href="#i-list"/></svg><span>Playlists</span></a>
+        <a href="#/stats" data-route="stats"><svg class="ic"><use href="#i-chart"/></svg><span>Stats</span></a>
+        <a href="#/settings" data-route="settings"><svg class="ic"><use href="#i-gear"/></svg><span>Settings</span></a>
       </nav>
-      <button class="btn primary add-btn" data-act="add-folder"><svg class="ic"><use href="#i-plus"/></svg><span>افزودن موزیک</span></button>
+      <button class="btn primary add-btn" data-act="add-folder"><svg class="ic"><use href="#i-plus"/></svg><span>Add music</span></button>
       <div id="detect-status" class="detect-status" hidden></div>
     </aside>
 
-    <!-- محتوای اصلی -->
+    <!-- Main content -->
     <main class="main">
       <div class="topbar">
         <div class="searchbox">
           <svg class="ic"><use href="#i-search"/></svg>
-          <input id="search" type="search" placeholder="جستجوی آهنگ، خواننده، آلبوم یا کشور…" autocomplete="off">
+          <input id="search" type="search" placeholder="Search songs, artists, albums or countries…" autocomplete="off">
         </div>
-        <button class="icon-btn top-add" data-act="add-folder" title="افزودن موزیک"><svg class="ic"><use href="#i-plus"/></svg></button>
+        <button class="icon-btn top-add" data-act="add-folder" title="Add music"><svg class="ic"><use href="#i-plus"/></svg></button>
       </div>
-      <div id="access-banner" class="banner" hidden>🔒 برای پخش آهنگ‌ها، دسترسی به پوشه‌ی موزیک رو دوباره تایید کن — <b>اینجا بزن</b></div>
+      <div id="access-banner" class="banner" hidden>🔒 To play your songs, confirm access to your music folder again — <b>click here</b></div>
       <div id="view" class="view"></div>
     </main>
   </div>
 
-  <!-- پخش‌کننده‌ی پایین -->
+  <!-- Bottom player -->
   <footer id="playerbar" class="playerbar empty">
     <div class="mini-progress"><i id="mini-progress"></i></div>
     <div class="mini-info">
       <div class="cover sm" data-np="cover" data-act="open-np"><span>♪</span></div>
       <div class="mini-text">
-        <div class="mini-title" data-np="title">چیزی در حال پخش نیست</div>
+        <div class="mini-title" data-np="title">Nothing playing</div>
         <a class="mini-artist" data-np="artist"></a>
       </div>
       <button class="icon-btn like" data-np="like" data-act="like"><svg class="ic"><use href="#i-heart"/></svg></button>
     </div>
     <div class="mini-center">
       <div class="controls">
-        <button class="icon-btn sm-hide" data-act="shuffle" title="تصادفی"><svg class="ic"><use href="#i-shuffle"/></svg></button>
-        <button class="icon-btn sm-hide" data-act="prev" title="قبلی"><svg class="ic"><use href="#i-prev"/></svg></button>
-        <button class="play-btn" data-act="toggle" title="پخش"><svg class="ic"><use href="#i-play"/></svg></button>
-        <button class="icon-btn" data-act="next" title="بعدی"><svg class="ic"><use href="#i-next"/></svg></button>
-        <button class="icon-btn sm-hide" data-act="repeat" title="تکرار"><svg class="ic"><use href="#i-repeat"/></svg></button>
+        <button class="icon-btn sm-hide" data-act="shuffle" title="Shuffle"><svg class="ic"><use href="#i-shuffle"/></svg></button>
+        <button class="icon-btn sm-hide" data-act="prev" title="Previous"><svg class="ic"><use href="#i-prev"/></svg></button>
+        <button class="play-btn" data-act="toggle" title="Play"><svg class="ic"><use href="#i-play"/></svg></button>
+        <button class="icon-btn" data-act="next" title="Next"><svg class="ic"><use href="#i-next"/></svg></button>
+        <button class="icon-btn sm-hide" data-act="repeat" title="Repeat"><svg class="ic"><use href="#i-repeat"/></svg></button>
       </div>
       <div class="timeline sm-hide">
-        <span data-np="cur">۰:۰۰</span>
-        <input type="range" class="seek" min="0" max="1000" value="0" aria-label="زمان">
-        <span data-np="dur">۰:۰۰</span>
+        <span data-np="cur">0:00</span>
+        <input type="range" class="seek" min="0" max="1000" value="0" aria-label="Position">
+        <span data-np="dur">0:00</span>
       </div>
     </div>
     <div class="mini-right sm-hide">
       <span data-np="country"></span>
-      <button class="icon-btn" data-act="sleep" title="تایمر خواب"><svg class="ic"><use href="#i-moon"/></svg></button>
+      <button class="icon-btn" data-act="sleep" title="Sleep timer"><svg class="ic"><use href="#i-moon"/></svg></button>
       <button class="icon-btn" data-act="mute"><svg class="ic"><use href="#i-vol"/></svg></button>
-      <input type="range" class="vol" min="0" max="100" value="90" aria-label="صدا">
-      <button class="icon-btn" data-act="open-np" title="تمام صفحه"><svg class="ic" style="transform:rotate(180deg)"><use href="#i-chev-down"/></svg></button>
+      <input type="range" class="vol" min="0" max="100" value="90" aria-label="Volume">
+      <button class="icon-btn" data-act="open-np" title="Now Playing"><svg class="ic" style="transform:rotate(180deg)"><use href="#i-chev-down"/></svg></button>
     </div>
   </footer>
 
-  <!-- ناوبری موبایل -->
+  <!-- Mobile navigation -->
   <nav class="bottomnav nav">
-    <a href="#/home" data-route="home"><svg class="ic"><use href="#i-home"/></svg><span>خانه</span></a>
-    <a href="#/new" data-route="new"><svg class="ic"><use href="#i-sparkle"/></svg><span>تازه‌ها</span></a>
-    <a href="#/countries" data-route="countries"><svg class="ic"><use href="#i-globe"/></svg><span>کشورها</span></a>
-    <a href="#/library" data-route="library"><svg class="ic"><use href="#i-library"/></svg><span>کتابخانه</span></a>
-    <a href="#/playlists" data-route="playlists"><svg class="ic"><use href="#i-list"/></svg><span>پلی‌لیست</span></a>
+    <a href="#/home" data-route="home"><svg class="ic"><use href="#i-home"/></svg><span>Home</span></a>
+    <a href="#/new" data-route="new"><svg class="ic"><use href="#i-sparkle"/></svg><span>New</span></a>
+    <a href="#/countries" data-route="countries"><svg class="ic"><use href="#i-globe"/></svg><span>Countries</span></a>
+    <a href="#/library" data-route="library"><svg class="ic"><use href="#i-library"/></svg><span>Library</span></a>
+    <a href="#/playlists" data-route="playlists"><svg class="ic"><use href="#i-list"/></svg><span>Playlists</span></a>
   </nav>
 
-  <!-- صفحه‌ی در حال پخش -->
-  <section id="np" class="np" aria-label="در حال پخش">
+  <!-- Now Playing -->
+  <section id="np" class="np" aria-label="Now Playing">
     <div class="np-bg"></div>
     <div class="np-top">
-      <button class="icon-btn" data-act="close-np" title="بستن"><svg class="ic"><use href="#i-chev-down"/></svg></button>
-      <div class="np-label">در حال پخش<small class="np-album"></small></div>
-      <button class="icon-btn" data-act="menu" title="بیشتر"><svg class="ic"><use href="#i-more"/></svg></button>
+      <button class="icon-btn" data-act="close-np" title="Close"><svg class="ic"><use href="#i-chev-down"/></svg></button>
+      <div class="np-label">Now Playing<small class="np-album"></small></div>
+      <button class="icon-btn" data-act="menu" title="More"><svg class="ic"><use href="#i-more"/></svg></button>
     </div>
     <div class="np-body">
       <div class="np-stage">
@@ -173,9 +174,9 @@
         </div>
         <div class="np-country" data-np="country"></div>
         <div class="timeline">
-          <span data-np="cur">۰:۰۰</span>
-          <input type="range" class="seek" min="0" max="1000" value="0" aria-label="زمان">
-          <span data-np="dur">۰:۰۰</span>
+          <span data-np="cur">0:00</span>
+          <input type="range" class="seek" min="0" max="1000" value="0" aria-label="Position">
+          <span data-np="dur">0:00</span>
         </div>
         <div class="controls big">
           <button class="icon-btn" data-act="shuffle"><svg class="ic"><use href="#i-shuffle"/></svg></button>
@@ -185,11 +186,11 @@
           <button class="icon-btn" data-act="repeat"><svg class="ic"><use href="#i-repeat"/></svg></button>
         </div>
         <div class="np-tools">
-          <button class="icon-btn" data-act="np-tab" data-tab="lyrics" title="متن آهنگ"><svg class="ic"><use href="#i-lyrics"/></svg></button>
-          <button class="icon-btn" data-act="np-tab" data-tab="queue" title="صف پخش"><svg class="ic"><use href="#i-queue"/></svg></button>
-          <button class="icon-btn" data-act="np-tab" data-tab="eq" title="اکولایزر و سرعت"><svg class="ic"><use href="#i-sliders"/></svg></button>
-          <button class="icon-btn" data-act="sleep" title="تایمر خواب"><svg class="ic"><use href="#i-moon"/></svg></button>
-          <div class="np-vol"><button class="icon-btn" data-act="mute"><svg class="ic"><use href="#i-vol"/></svg></button><input type="range" class="vol" min="0" max="100" value="90" aria-label="صدا"></div>
+          <button class="icon-btn" data-act="np-tab" data-tab="lyrics" title="Lyrics"><svg class="ic"><use href="#i-lyrics"/></svg></button>
+          <button class="icon-btn" data-act="np-tab" data-tab="queue" title="Queue"><svg class="ic"><use href="#i-queue"/></svg></button>
+          <button class="icon-btn" data-act="np-tab" data-tab="eq" title="Equalizer & speed"><svg class="ic"><use href="#i-sliders"/></svg></button>
+          <button class="icon-btn" data-act="sleep" title="Sleep timer"><svg class="ic"><use href="#i-moon"/></svg></button>
+          <div class="np-vol"><button class="icon-btn" data-act="mute"><svg class="ic"><use href="#i-vol"/></svg></button><input type="range" class="vol" min="0" max="100" value="90" aria-label="Volume"></div>
         </div>
       </div>
       <aside class="np-side">
@@ -200,16 +201,16 @@
     </div>
   </section>
 
-  <!-- اسکن -->
+  <!-- Scan progress -->
   <div id="scan" class="scan" hidden>
-    <div class="scan-head"><span class="spinner"></span><b id="scan-text">در حال خواندن…</b><small id="scan-count"></small></div>
+    <div class="scan-head"><span class="spinner"></span><b id="scan-text">Reading…</b><small id="scan-count"></small></div>
     <div class="scan-track"><i id="scan-bar"></i></div>
   </div>
 
   <div id="menu" class="menu" hidden></div>
   <div id="dialog" class="dialog" hidden></div>
   <div id="toasts" class="toasts"></div>
-  <div class="drop-hint"><div><svg class="ic"><use href="#i-download"/></svg><b>فایل‌ها یا پوشه رو اینجا رها کن</b></div></div>
+  <div class="drop-hint"><div><svg class="ic"><use href="#i-download"/></svg><b>Drop files or a folder here</b></div></div>
 
   <input id="dir-input" type="file" webkitdirectory directory multiple hidden>
   <input id="file-input" type="file" accept="audio/*,.mp3,.m4a,.flac,.ogg,.opus,.wav,.aac" multiple hidden>

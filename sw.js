@@ -1,5 +1,5 @@
-/* سرویس‌ورکر آوا: اجرای آفلاین */
-const CACHE = 'ava-v1';
+/* Service worker: offline support */
+const CACHE = 'music-v2';
 const CORE = [
   './', './index.html', './css/style.css', './manifest.webmanifest', './icons/icon.svg',
   './vendor/jsmediatags.min.js', './js/db.js', './js/artists.js', './js/country.js',
@@ -17,7 +17,7 @@ self.addEventListener('fetch', (e) => {
   const sameOrigin = url.origin === location.origin;
   const cacheable = sameOrigin || /fonts\.(googleapis|gstatic)\.com|flagcdn\.com/.test(url.hostname);
   if (!cacheable) return;
-  // شبکه اول برای فایل‌های خود اپ (تا به‌روزرسانی‌ها سریع برسند)، کش اول برای فونت و پرچم
+  // Network-first for app files (so updates arrive fast), cache-first for fonts and flags
   if (sameOrigin) {
     e.respondWith(fetch(e.request).then((r) => {
       const copy = r.clone(); caches.open(CACHE).then((c) => c.put(e.request, copy)); return r;

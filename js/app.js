@@ -1,61 +1,61 @@
-/* آوا — اپلیکیشن موسیقی شخصی با تشخیص خودکار کشور */
+/* Music — a personal music player that detects each song's country */
 (function () {
   'use strict';
 
   /* =========================================================
-   * ابزارها
+   * Helpers
    * ========================================================= */
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  const FA_DIGITS = '۰۱۲۳۴۵۶۷۸۹';
-  const fa = (v) => String(v).replace(/\d/g, (d) => FA_DIGITS[d]);
-  const num = (n) => fa(Number(n || 0).toLocaleString('en-US'));
+  const num = (n) => Number(n || 0).toLocaleString('en-US');
+  const plural = (n, word, many) => `${num(n)} ${n === 1 ? word : (many || word + 's')}`;
+  const songs = (n) => plural(n, 'song');
   const fmtTime = (s) => {
     s = Math.max(0, Math.floor(s || 0));
     const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
-    return fa(h ? `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}` : `${m}:${String(sec).padStart(2, '0')}`);
+    return h ? `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}` : `${m}:${String(sec).padStart(2, '0')}`;
   };
   const fmtLong = (s) => {
     const h = Math.floor(s / 3600), m = Math.round((s % 3600) / 60);
-    return h ? `${num(h)} ساعت و ${num(m)} دقیقه` : `${num(m)} دقیقه`;
+    return h ? `${num(h)} hr ${num(m)} min` : `${num(m)} min`;
   };
   const hash = (s) => { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return Math.abs(h); };
   const relDate = (ts) => {
     const d = (Date.now() - ts) / 86400000;
-    if (d < 1) return 'امروز';
-    if (d < 2) return 'دیروز';
-    if (d < 7) return `${num(Math.floor(d))} روز پیش`;
-    if (d < 30) return `${num(Math.floor(d / 7))} هفته پیش`;
-    if (d < 365) return `${num(Math.floor(d / 30))} ماه پیش`;
-    return `${num(Math.floor(d / 365))} سال پیش`;
+    if (d < 1) return 'Today';
+    if (d < 2) return 'Yesterday';
+    if (d < 7) return `${Math.floor(d)} days ago`;
+    if (d < 30) return plural(Math.floor(d / 7), 'week') + ' ago';
+    if (d < 365) return plural(Math.floor(d / 30), 'month') + ' ago';
+    return plural(Math.floor(d / 365), 'year') + ' ago';
   };
   const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
   const icon = (name) => `<svg class="ic"><use href="#i-${name}"/></svg>`;
+  const collator = new Intl.Collator('en', { sensitivity: 'base', numeric: true });
 
   /* =========================================================
-   * وضعیت
+   * State
    * ========================================================= */
   const S = {
     tracks: new Map(),      // id → track
-    files: new Map(),       // id → File (همین جلسه)
-    artists: new Map(),     // نام نرمال خواننده → { country, source, why, confidence, manual, checked }
-    playlists: new Map(),   // id → { id, name, ids, created, color }
-    coverUrls: new Map(),   // coverId → url
+    files: new Map(),       // id → File (this session)
+    artists: new Map(),     // normalised artist name → { country, source, why, confidence, manual, checked }
+    playlists: new Map(),   // id → { id, name, ids, created }
+    coverUrls: new Map(),   // coverId → object URL
     coverColors: new Map(),
-    history: [],            // آخرین پخش‌ها
-    dirs: [],               // FileSystemDirectoryHandle ها
+    history: [],            // recently played ids
+    dirs: [],               // FileSystemDirectoryHandle[]
     settings: {
       online: true, keepCopies: !window.showDirectoryPicker, accent: '#8b5cf6', dynamic: true,
-      theme: 'dark', volume: 0.9, rate: 1, eq: Array(10).fill(0), eqPreset: 'صاف', visualizer: true,
+      theme: 'dark', volume: 0.9, rate: 1, eq: Array(10).fill(0), eqPreset: 'Flat', visualizer: true,
     },
     listenSeconds: 0,
-    lists: {},              // لیست‌های رندر شده برای پخش
+    lists: {},              // rendered lists, so rows can be played in context
   };
-  window.AvaState = S;
+  window.MusicState = S;
 
   const saveSettings = debounce(() => DB.set('kv', 'settings', S.settings), 300);
-  const saveTrack = (t) => DB.set('tracks', t.id, t);
   const saveArtists = debounce(() => DB.set('kv', 'artists', Array.from(S.artists.entries())), 800);
   const savePlaylists = () => DB.set('kv', 'playlists', Array.from(S.playlists.values()));
   const pendingTrackSaves = new Set();
@@ -67,7 +67,7 @@
   const queueSave = (t) => { pendingTrackSaves.add(t.id); flushTracks(); };
 
   /* =========================================================
-   * کشور
+   * Country
    * ========================================================= */
   const FAMILY = {
     IR: ['IR', 'AF', 'TJ'],
@@ -77,18 +77,18 @@
     IN: ['IN', 'PK', 'NP', 'BD', 'LK'],
     PK: ['PK', 'IN'],
   };
-  const artistKey = (t) => Country.norm(Country.primaryArtist(t.albumArtist && t.albumArtist !== 'Various Artists' ? t.artist : t.artist));
+  const artistKey = (t) => Country.norm(Country.primaryArtist(t.artist));
 
   function resolveCountry(t) {
     let code = null, why = '', source = '', conf = 0;
-    if (t.manualCountry) { code = t.manualCountry; source = 'manual'; why = 'انتخاب شما'; conf = 1; }
+    if (t.manualCountry) { code = t.manualCountry; source = 'manual'; why = 'Your choice'; conf = 1; }
     else {
       const a = S.artists.get(artistKey(t));
       const g = t.guess;
-      if (a && a.manual) { code = a.country; source = 'manual'; why = 'انتخاب شما برای این خواننده'; conf = 1; }
+      if (a && a.manual) { code = a.country; source = 'manual'; why = 'Your choice for this artist'; conf = 1; }
       else if (a && a.country) {
         code = a.country; source = a.source; why = a.why; conf = a.confidence;
-        // اگر MusicBrainz با خط نوشتاری نام خواننده تناقض داشت، خط قوی‌تر است
+        // If MusicBrainz contradicts a strong writing-script signal, trust the script
         if (a.source === 'musicbrainz' && g && g.source === 'script' && g.confidence >= 0.7) {
           const fam = FAMILY[g.code] || [g.code];
           if (!fam.includes(a.country)) { code = g.code; source = g.source; why = g.why; conf = g.confidence; }
@@ -96,22 +96,23 @@
       } else if (g) { code = g.code; source = g.source; why = g.why; conf = g.confidence; }
     }
     const changed = t.country !== (code || 'ZZ');
-    t.country = code || 'ZZ'; t.countrySource = source || 'none'; t.countryWhy = why || 'هنوز تشخیص داده نشده'; t.countryConf = conf;
+    t.country = code || 'ZZ'; t.countrySource = source || 'none'; t.countryWhy = why || 'Not detected yet'; t.countryConf = conf;
     return changed;
   }
 
   const SOURCE_LABEL = {
-    manual: 'دستی', db: 'پایگاه داده‌ی آوا', musicbrainz: 'MusicBrainz', script: 'خط نوشتاری',
-    genre: 'ژانر', folder: 'نام پوشه', words: 'کلمات متن', none: 'نامشخص',
+    manual: 'Manual', db: 'Built-in database', musicbrainz: 'MusicBrainz', script: 'Writing script',
+    genre: 'Genre', folder: 'Folder name', words: 'Lyrics/title words', none: 'Unknown',
   };
+  const KNOWN_WHY = 'Known artist in the built-in database';
 
-  /* صف تشخیص آنلاین */
+  /* Detection queue */
   let detecting = 0;
   async function detectCountries({ force = false } = {}) {
-    // ۱. پایگاه داده‌ی داخلی + حدس متنی
+    // 1. built-in database + text guess
     const byArtist = new Map();
     for (const t of S.tracks.values()) {
-      if (force || !t.guess) { t.guess = Country.guessFromText(t); queueSave(t); }
+      if (force || !t.guess || /[؀-ۿ]/.test(t.guess.why || '')) { t.guess = Country.guessFromText(t); queueSave(t); }
       const k = artistKey(t);
       if (!byArtist.has(k)) byArtist.set(k, { name: Country.primaryArtist(t.artist), count: 0 });
       byArtist.get(k).count++;
@@ -121,16 +122,16 @@
       if (cur && cur.manual) continue;
       if (cur && !force && (cur.country || cur.checked)) continue;
       const known = Country.lookupKnown(info.name);
-      if (known) S.artists.set(k, { country: known, source: 'db', why: 'شناخته‌شده در پایگاه داده‌ی آوا', confidence: 0.95, checked: true });
+      if (known) S.artists.set(k, { country: known, source: 'db', why: KNOWN_WHY, confidence: 0.95, checked: true });
       else if (force && cur && cur.source !== 'manual') S.artists.delete(k);
     }
     saveArtists();
     recomputeAll();
 
-    // ۲. MusicBrainz برای بقیه
+    // 2. MusicBrainz for the rest
     if (!S.settings.online || !navigator.onLine) return;
     const todo = Array.from(byArtist.entries())
-      .filter(([k, info]) => { const a = S.artists.get(k); return !a && info.name && !/ناشناس|unknown/i.test(info.name); })
+      .filter(([k, info]) => { const a = S.artists.get(k); return !a && info.name && !/unknown/i.test(info.name); })
       .sort((a, b) => b[1].count - a[1].count);
     detecting += todo.length;
     updateDetectBadge();
@@ -139,7 +140,7 @@
       const r = await Country.lookupOnline(info.name);
       detecting--;
       updateDetectBadge();
-      if (r && r.error) continue; // بعداً دوباره امتحان می‌شود
+      if (r && r.error) continue; // retried next time
       S.artists.set(k, r ? { ...r, checked: true } : { country: null, source: 'none', checked: true });
       saveArtists();
       let changed = false;
@@ -160,12 +161,12 @@
     if (!el) return;
     if (detecting > 0) {
       el.hidden = false;
-      el.innerHTML = `<span class="pulse"></span> در حال بررسی کشور ${num(detecting)} خواننده…`;
+      el.innerHTML = `<span class="pulse"></span> Checking the country of ${plural(detecting, 'artist')}…`;
     } else el.hidden = true;
   }
 
   /* =========================================================
-   * کاورها
+   * Cover art
    * ========================================================= */
   const coverObserver = new IntersectionObserver((entries) => {
     for (const e of entries) {
@@ -197,12 +198,12 @@
   function coverHtml(t, cls = '', label) {
     const seed = t ? (t.album || t.artist || t.title || '') : (label || '');
     const hue = hash(seed) % 360;
-    const letter = esc((label || (t && (t.album || t.title)) || '♪').trim().charAt(0) || '♪');
+    const letter = esc((label || (t && (t.album || t.title)) || '♪').trim().charAt(0).toUpperCase() || '♪');
     return `<div class="cover ${cls}" data-cid="${esc(t && t.coverId || '')}" style="--h:${hue}"><span>${letter}</span></div>`;
   }
 
   /* =========================================================
-   * دسترسی به فایل‌ها
+   * File access
    * ========================================================= */
   async function resolveUrl(id) {
     let f = S.files.get(id);
@@ -224,7 +225,7 @@
         let p = await d.queryPermission({ mode: 'read' });
         if (p !== 'granted' && prompt) p = await d.requestPermission({ mode: 'read' });
         if (p === 'granted') { any = true; if (!d._scanned) { d._scanned = true; await scanFromHandle(d, { quiet: true }); } }
-      } catch (e) { /* handle قدیمی */ }
+      } catch (e) { /* stale handle */ }
     }
     if (any) $('#access-banner').hidden = true;
     return any;
@@ -240,7 +241,7 @@
         }
         d._scanned = true;
         await scanFromHandle(d);
-      } catch (e) { if (e.name !== 'AbortError') toast('دسترسی به پوشه ممکن نشد'); }
+      } catch (e) { if (e.name !== 'AbortError') toast("Couldn't access that folder"); }
     } else {
       $('#dir-input').click();
     }
@@ -248,17 +249,17 @@
 
   async function scanFromHandle(d, opts = {}) {
     const items = [];
-    showScan('در حال جستجوی فایل‌ها…', 0, 0);
+    showScan('Looking for music files…', 0, 0);
     for await (const it of Scanner.walkHandle(d, d.name + '/')) {
       items.push(it);
-      if (items.length % 50 === 0) showScan(`پیدا شد: ${num(items.length)} آهنگ`, 0, 0);
+      if (items.length % 50 === 0) showScan(`Found ${songs(items.length)}`, 0, 0);
     }
     await ingest(items, { ...opts, root: d.name + '/' });
   }
 
   function filesFromInput(list) {
     return Array.from(list).filter((f) => Scanner.isAudio(f.name))
-      .map((f) => ({ file: f, path: f.webkitRelativePath || ('آهنگ‌های من/' + f.name) }));
+      .map((f) => ({ file: f, path: f.webkitRelativePath || ('My Music/' + f.name) }));
   }
 
   async function readDropped(dt) {
@@ -276,15 +277,15 @@
       } else res();
     });
     const entries = Array.from(dt.items || []).map((i) => i.webkitGetAsEntry && i.webkitGetAsEntry()).filter(Boolean);
-    if (entries.length) for (const e of entries) await walk(e, e.isDirectory ? '' : 'آهنگ‌های من/');
+    if (entries.length) for (const e of entries) await walk(e, e.isDirectory ? '' : 'My Music/');
     else out.push(...filesFromInput(dt.files));
     return out;
   }
 
-  /* پردازش فایل‌های پیدا شده */
+  /* Import found files */
   let ingesting = false;
   async function ingest(items, { quiet = false, root = null } = {}) {
-    if (ingesting) { toast('یک اسکن در حال انجام است'); return; }
+    if (ingesting) { toast('A scan is already running'); return; }
     ingesting = true;
     try { await ingestInner(items, { quiet, root }); } finally { ingesting = false; hideScan(); }
     render();
@@ -304,7 +305,7 @@
       seen.add(id);
       S.files.set(id, file);
       if (S.tracks.has(id)) { done++; continue; }
-      if (!quiet || total - done > 0) showScan(`در حال خواندن «${path.split('/').pop()}»`, done, total);
+      showScan(`Reading "${path.split('/').pop()}"`, done, total);
       const { track, cover } = await Scanner.parse(file, path);
       track.id = id;
       track.addedAt = firstImport ? Math.min(track.mtime, Date.now()) : Date.now();
@@ -321,12 +322,12 @@
       resolveCountry(track);
       batch.push([id, track]);
       fresh.push(track);
-      if (S.settings.keepCopies) { try { await DB.set('files', id, file); } catch (e) { /* فضای کافی نیست */ } }
+      if (S.settings.keepCopies) { try { await DB.set('files', id, file); } catch (e) { /* out of storage */ } }
       if (batch.length >= 40) { await DB.putMany('tracks', batch.splice(0)); softRefresh(); }
       done++;
     }
     if (batch.length) await DB.putMany('tracks', batch);
-    // آهنگ‌هایی که از پوشه حذف شده‌اند
+    // Remove tracks that disappeared from the folder
     let removed = 0;
     if (root) {
       for (const t of Array.from(S.tracks.values())) {
@@ -336,9 +337,9 @@
         }
       }
     }
-    if (fresh.length) toast(`${num(fresh.length)} آهنگ تازه اضافه شد ✨`);
-    else if (!quiet) toast('آهنگ تازه‌ای پیدا نشد');
-    if (removed) toast(`${num(removed)} آهنگ حذف‌شده از کتابخانه پاک شد`);
+    if (fresh.length) toast(`Added ${plural(fresh.length, 'new song')} ✨`);
+    else if (!quiet) toast('No new songs found');
+    if (removed) toast(`Removed ${plural(removed, 'deleted song')} from the library`);
   }
 
   let durRunning = false;
@@ -355,13 +356,13 @@
   }
 
   /* =========================================================
-   * اسکن و پیام‌ها
+   * Scan panel & toasts
    * ========================================================= */
   function showScan(text, done, total) {
     const el = $('#scan');
     el.hidden = false;
     $('#scan-text').textContent = text;
-    $('#scan-count').textContent = total ? `${num(done)} از ${num(total)}` : '';
+    $('#scan-count').textContent = total ? `${num(done)} of ${num(total)}` : '';
     $('#scan-bar').style.width = total ? `${(done / total) * 100}%` : '30%';
     $('#scan-bar').classList.toggle('indet', !total);
   }
@@ -379,12 +380,12 @@
   }
 
   /* =========================================================
-   * کوئری‌ها
+   * Queries
    * ========================================================= */
   const all = () => Array.from(S.tracks.values());
   const byAdded = () => all().sort((a, b) => b.addedAt - a.addedAt);
   const sortTracks = (arr, by) => {
-    const c = new Intl.Collator('fa');
+    const c = collator;
     const f = {
       title: (a, b) => c.compare(a.title, b.title),
       artist: (a, b) => c.compare(a.artist, b.artist) || c.compare(a.album, b.album) || (a.trackNo || 0) - (b.trackNo || 0),
@@ -425,7 +426,7 @@
   };
 
   /* =========================================================
-   * اجزای رابط کاربری
+   * UI building blocks
    * ========================================================= */
   function flagHtml(code, cls = '') {
     const url = Country.flagUrl(code);
@@ -446,24 +447,24 @@
   function trackRow(t, key, i, { showAlbum, numbered, showAdded }) {
     const playing = Player.current === t.id;
     return `<div class="row ${playing ? 'playing' : ''}" data-id="${t.id}" data-list="${esc(key)}" data-i="${i}" draggable="true">
-      <div class="row-lead">${numbered ? `<span class="row-num">${fa(t.trackNo || i + 1)}</span>` : coverHtml(t, 'xs')}<span class="eq-anim"><i></i><i></i><i></i></span><button class="row-play" data-act="play-row" aria-label="پخش">${icon('play')}</button></div>
+      <div class="row-lead">${numbered ? `<span class="row-num">${t.trackNo || i + 1}</span>` : coverHtml(t, 'xs')}<span class="eq-anim"><i></i><i></i><i></i></span><button class="row-play" data-act="play-row" aria-label="Play">${icon('play')}</button></div>
       <div class="row-main"><div class="row-title">${esc(t.title)}</div><div class="row-sub"><a data-go="artist/${encodeURIComponent(artistKey(t))}">${esc(t.artist)}</a></div></div>
       ${showAlbum ? `<div class="row-album">${t.album ? `<a data-go="album/${encodeURIComponent(albumKeyOf(t))}">${esc(t.album)}</a>` : ''}</div>` : ''}
       <div class="row-country">${countryChip(t)}</div>
       ${showAdded ? `<div class="row-added">${relDate(t.addedAt)}</div>` : ''}
-      <button class="icon-btn like ${t.liked ? 'on' : ''}" data-act="like" data-like-id="${t.id}" aria-label="پسندیدن">${icon(t.liked ? 'heart-fill' : 'heart')}</button>
+      <button class="icon-btn like ${t.liked ? 'on' : ''}" data-act="like" data-like-id="${t.id}" aria-label="Like">${icon(t.liked ? 'heart-fill' : 'heart')}</button>
       <div class="row-dur">${t.duration ? fmtTime(t.duration) : '–'}</div>
-      <button class="icon-btn" data-act="menu" aria-label="بیشتر">${icon('more')}</button>
+      <button class="icon-btn" data-act="menu" aria-label="More">${icon('more')}</button>
     </div>`;
   }
 
   function card({ cover, title, sub, go, play, round = false, badge = '' }) {
     return `<div class="card ${round ? 'round' : ''}" ${go ? `data-go="${go}"` : ''}>
-      <div class="card-art">${cover}${badge}${play ? `<button class="fab-play" data-act="play-key" data-key="${esc(play)}" aria-label="پخش">${icon('play')}</button>` : ''}</div>
+      <div class="card-art">${cover}${badge}${play ? `<button class="fab-play" data-act="play-key" data-key="${esc(play)}" aria-label="Play">${icon('play')}</button>` : ''}</div>
       <div class="card-title">${esc(title)}</div>${sub ? `<div class="card-sub">${sub}</div>` : ''}
     </div>`;
   }
-  const shelf = (title, inner, more) => `<section class="shelf"><div class="shelf-head"><h2>${title}</h2>${more ? `<a class="see-all" data-go="${more}">مشاهده همه ${icon('chev-left')}</a>` : ''}</div><div class="scroller">${inner}</div></section>`;
+  const shelf = (title, inner, more) => `<section class="shelf"><div class="shelf-head"><h2>${title}</h2>${more ? `<a class="see-all" data-go="${more}">Show all ${icon('chev-right')}</a>` : ''}</div><div class="scroller">${inner}</div></section>`;
 
   function countryCard(c, big = false) {
     const key = registerList('country-' + c.code, c.tracks);
@@ -474,9 +475,9 @@
       ${url ? `<div class="ccard-bg" style="background-image:url('${url}')"></div>` : '<div class="ccard-bg none"></div>'}
       <div class="ccard-flag">${flagHtml(c.code, 'lg')}</div>
       <div class="ccard-info"><div class="ccard-name">${esc(Country.name(c.code))}</div>
-      <div class="ccard-sub">${num(c.tracks.length)} آهنگ • ${num(artists)} خواننده</div></div>
+      <div class="ccard-sub">${songs(c.tracks.length)} • ${plural(artists, 'artist')}</div></div>
       <div class="ccard-covers">${covers.map((t) => coverHtml(t, 'mini')).join('')}</div>
-      <button class="fab-play" data-act="play-key" data-key="${key}" aria-label="پخش">${icon('play')}</button>
+      <button class="fab-play" data-act="play-key" data-key="${key}" aria-label="Play">${icon('play')}</button>
     </div>`;
   }
 
@@ -484,31 +485,31 @@
     return `<header class="hero" ${bg ? `style="--hero:${bg}"` : ''}><div class="hero-art">${art}</div>
       <div class="hero-info"><div class="kicker">${kicker}</div><h1>${title}</h1><div class="hero-meta">${meta}</div><div class="hero-actions">${actions}</div></div></header>`;
   }
-  const playBtns = (key) => `<button class="btn primary big" data-act="play-key" data-key="${esc(key)}">${icon('play')} پخش</button>
-    <button class="btn ghost big" data-act="shuffle-key" data-key="${esc(key)}">${icon('shuffle')} پخش تصادفی</button>`;
+  const playBtns = (key) => `<button class="btn primary big" data-act="play-key" data-key="${esc(key)}">${icon('play')} Play</button>
+    <button class="btn ghost big" data-act="shuffle-key" data-key="${esc(key)}">${icon('shuffle')} Shuffle</button>`;
 
   /* =========================================================
-   * صفحه‌ها
+   * Views
    * ========================================================= */
   const views = {};
 
   function emptyState() {
     return `<div class="empty-state">
       <div class="empty-art"><div class="disc"></div></div>
-      <h1>به آوا خوش اومدی 🎧</h1>
-      <p>پوشه‌ی آهنگ‌هات رو انتخاب کن. آوا همه‌ی آهنگ‌ها رو می‌خونه، کاور و اطلاعاتشون رو درمیاره و <b>کشور هر آهنگ رو خودش تشخیص می‌ده</b>.</p>
+      <h1>Welcome to Music 🎧</h1>
+      <p>Pick your music folder. Music reads every song, pulls out cover art and details, and <b>works out which country each song is from — automatically</b>.</p>
       <div class="empty-actions">
-        <button class="btn primary big" data-act="add-folder">${icon('folder')} انتخاب پوشه‌ی موزیک</button>
-        <button class="btn ghost big" data-act="add-files">${icon('plus')} انتخاب چند آهنگ</button>
+        <button class="btn primary big" data-act="add-folder">${icon('folder')} Choose music folder</button>
+        <button class="btn ghost big" data-act="add-files">${icon('plus')} Pick some songs</button>
       </div>
-      <p class="hint">می‌تونی فایل‌ها یا پوشه‌ها رو مستقیم بکشی و اینجا رها کنی. فایل‌ها از دستگاهت خارج نمی‌شن.</p>
+      <p class="hint">You can also drag files or folders straight onto this page. Your files never leave your device.</p>
     </div>`;
   }
 
   views.home = () => {
     if (!S.tracks.size) return emptyState();
     const h = new Date().getHours();
-    const greet = h < 5 ? 'شب بخیر' : h < 12 ? 'صبح بخیر' : h < 17 ? 'ظهر بخیر' : h < 20 ? 'عصر بخیر' : 'شب بخیر';
+    const greet = h < 5 ? 'Good night' : h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
     const tracks = all();
     const recent = byAdded().slice(0, 18);
     const cs = countries();
@@ -522,48 +523,47 @@
     const never = tracks.filter((t) => !t.plays);
     const liked = tracks.filter((t) => t.liked);
     const arts = artistsList().slice(0, 14);
+    const realCountries = cs.filter((c) => c.code !== 'ZZ').length;
 
     let html = `<section class="greet">
-      <div><h1>${greet} 👋</h1><p>${num(tracks.length)} آهنگ از ${num(cs.filter((c) => c.code !== 'ZZ').length)} کشور${totalDur ? ' • ' + fmtLong(totalDur) + ' موسیقی' : ''}</p></div>
-      <div class="greet-actions"><button class="btn primary" data-act="shuffle-key" data-key="all">${icon('shuffle')} پخش تصادفی همه</button></div>
+      <div><h1>${greet} 👋</h1><p>${songs(tracks.length)} from ${plural(realCountries, 'country', 'countries')}${totalDur ? ' • ' + fmtLong(totalDur) + ' of music' : ''}</p></div>
+      <div class="greet-actions"><button class="btn primary" data-act="shuffle-key" data-key="all">${icon('shuffle')} Shuffle everything</button></div>
     </section>`;
 
-    // کاشی‌های سریع
     const quick = [
-      { t: 'آهنگ‌های پسندیده', s: `${num(liked.length)} آهنگ`, go: 'playlist/liked', g: 'linear-gradient(135deg,#ec4899,#8b5cf6)', i: 'heart-fill' },
-      { t: 'تازه اضافه‌شده', s: `${num(recent.length ? byAdded().filter((x) => Date.now() - x.addedAt < 30 * 864e5).length : 0)} آهنگ این ماه`, go: 'new', g: 'linear-gradient(135deg,#06b6d4,#3b82f6)', i: 'sparkle' },
-      { t: 'بیشترین پخش', s: `${num(top.length)} آهنگ`, go: 'playlist/top', g: 'linear-gradient(135deg,#f59e0b,#ef4444)', i: 'fire' },
-      { t: 'کشف دوباره', s: `${num(never.length)} آهنگ پخش‌نشده`, go: 'playlist/never', g: 'linear-gradient(135deg,#10b981,#06b6d4)', i: 'compass' },
+      { t: 'Liked Songs', s: songs(liked.length), go: 'playlist/liked', g: 'linear-gradient(135deg,#ec4899,#8b5cf6)', i: 'heart-fill' },
+      { t: 'Recently Added', s: `${songs(byAdded().filter((x) => Date.now() - x.addedAt < 30 * 864e5).length)} this month`, go: 'new', g: 'linear-gradient(135deg,#06b6d4,#3b82f6)', i: 'sparkle' },
+      { t: 'Most Played', s: songs(top.length), go: 'playlist/top', g: 'linear-gradient(135deg,#f59e0b,#ef4444)', i: 'fire' },
+      { t: 'Rediscover', s: `${songs(never.length)} never played`, go: 'playlist/never', g: 'linear-gradient(135deg,#10b981,#06b6d4)', i: 'compass' },
     ];
     html += `<section class="quick">${quick.map((q) => `<div class="qtile" data-go="${q.go}"><div class="qicon" style="background:${q.g}">${icon(q.i)}</div><div><b>${q.t}</b><small>${q.s}</small></div></div>`).join('')}</section>`;
 
-    html += shelf(`${icon('sparkle')} تازه اضافه‌شده‌ها`, recent.map((t, i) => card({
-      cover: coverHtml(t), title: t.title, sub: `${esc(t.artist)} • ${relDate(t.addedAt)}`, play: `new@${i}`, badge: Date.now() - t.addedAt < 3 * 864e5 ? '<span class="badge-new">جدید</span>' : '',
+    html += shelf(`${icon('sparkle')} Recently added`, recent.map((t, i) => card({
+      cover: coverHtml(t), title: t.title, sub: `${esc(t.artist)} • ${relDate(t.addedAt)}`, play: `new@${i}`, badge: Date.now() - t.addedAt < 3 * 864e5 ? '<span class="badge-new">NEW</span>' : '',
     })).join(''), 'new');
 
-    html += shelf(`${icon('globe')} بر اساس کشور`, cs.slice(0, 16).map((c) => countryCard(c)).join(''), 'countries');
+    html += shelf(`${icon('globe')} By country`, cs.slice(0, 16).map((c) => countryCard(c)).join(''), 'countries');
 
-    // میکس هر کشور
     const mixes = cs.filter((c) => c.code !== 'ZZ' && c.tracks.length >= 3).slice(0, 8);
     if (mixes.length) {
-      html += shelf(`${icon('disc')} میکس‌های کشوری برای تو`, mixes.map((c) => {
+      html += shelf(`${icon('disc')} Country mixes for you`, mixes.map((c) => {
         const key = registerList('mix-' + c.code, c.tracks);
         const cv = c.tracks.filter((t) => t.coverId).slice(0, 4);
         const grid = `<div class="mix-art" style="--h:${hash(c.code) % 360}">${cv.length >= 4 ? cv.map((t) => coverHtml(t, 'q')).join('') : coverHtml(c.tracks[0])}<div class="mix-flag">${flagHtml(c.code, 'md')}</div></div>`;
-        return card({ cover: grid, title: `میکس ${Country.name(c.code)}`, sub: `${num(c.tracks.length)} آهنگ`, play: key, go: `country/${c.code}` });
+        return card({ cover: grid, title: `${Country.name(c.code)} Mix`, sub: songs(c.tracks.length), play: key, go: `country/${c.code}` });
       }).join(''));
     }
     if (histU.length) {
       registerList('hist', histU);
-      html += shelf(`${icon('clock')} اخیراً گوش دادی`, histU.map((t, i) => card({ cover: coverHtml(t), title: t.title, sub: esc(t.artist), play: `hist@${i}` })).join(''), 'playlist/recent');
+      html += shelf(`${icon('clock')} Recently played`, histU.map((t, i) => card({ cover: coverHtml(t), title: t.title, sub: esc(t.artist), play: `hist@${i}` })).join(''), 'playlist/recent');
     }
     if (top.length) {
       registerList('top', top);
-      html += `<section class="shelf"><div class="shelf-head"><h2>${icon('fire')} محبوب‌ترین‌های تو</h2><a class="see-all" data-go="playlist/top">مشاهده همه ${icon('chev-left')}</a></div>${trackRows(top.slice(0, 6), 'top-mini', { showAlbum: false })}</section>`;
+      html += `<section class="shelf"><div class="shelf-head"><h2>${icon('fire')} Your top songs</h2><a class="see-all" data-go="playlist/top">Show all ${icon('chev-right')}</a></div>${trackRows(top.slice(0, 6), 'top-mini', { showAlbum: false })}</section>`;
     }
-    html += shelf(`${icon('mic')} خواننده‌ها`, arts.map((a) => card({
+    html += shelf(`${icon('mic')} Artists`, arts.map((a) => card({
       cover: coverHtml(a.tracks.find((t) => t.coverId) || a.tracks[0], 'round-cover', a.name), title: a.name,
-      sub: `${flagHtml(a.country, 'xs')} ${num(a.tracks.length)} آهنگ`, go: `artist/${encodeURIComponent(a.key)}`, round: true,
+      sub: `${flagHtml(a.country, 'xs')} ${songs(a.tracks.length)}`, go: `artist/${encodeURIComponent(a.key)}`, round: true,
     })).join(''), 'library/artists');
     return html;
   };
@@ -576,11 +576,11 @@
     const ranges = { today: 864e5, week: 7 * 864e5, month: 30 * 864e5, all: Infinity };
     const filtered = list.filter((t) => now - t.addedAt < ranges[filter]);
     const buckets = [
-      ['امروز', (t) => now - t.addedAt < 864e5],
-      ['این هفته', (t) => now - t.addedAt < 7 * 864e5],
-      ['این ماه', (t) => now - t.addedAt < 30 * 864e5],
-      ['سه ماه اخیر', (t) => now - t.addedAt < 90 * 864e5],
-      ['قدیمی‌تر', () => true],
+      ['Today', (t) => now - t.addedAt < 864e5],
+      ['This week', (t) => now - t.addedAt < 7 * 864e5],
+      ['This month', (t) => now - t.addedAt < 30 * 864e5],
+      ['Last 3 months', (t) => now - t.addedAt < 90 * 864e5],
+      ['Older', () => true],
     ];
     registerList('new', filtered);
     const used = new Set();
@@ -589,16 +589,16 @@
       const items = filtered.filter((t) => !used.has(t.id) && fn(t));
       items.forEach((t) => used.add(t.id));
       if (!items.length) continue;
-      sections += `<section class="bucket"><h3>${name} <small>${num(items.length)} آهنگ</small></h3>${trackRows(items, 'new-' + name, { showAdded: true })}</section>`;
+      sections += `<section class="bucket"><h3>${name} <small>${songs(items.length)}</small></h3>${trackRows(items, 'new-' + name, { showAdded: true })}</section>`;
     }
     const albums = albumsList().sort((a, b) => b.addedAt - a.addedAt).filter((a) => now - a.addedAt < ranges[filter]).slice(0, 12);
     return hero({
       art: `<div class="hero-icon" style="background:linear-gradient(135deg,#06b6d4,#8b5cf6)">${icon('sparkle')}</div>`,
-      kicker: 'پلی‌لیست هوشمند', title: 'تازه اضافه‌شده‌ها',
-      meta: `${num(filtered.length)} آهنگ • مرتب شده بر اساس زمان اضافه شدن`, actions: playBtns('new'),
-    }) + `<div class="tabs">${[['all', 'همه'], ['today', 'امروز'], ['week', 'این هفته'], ['month', 'این ماه']].map(([k, l]) => `<button class="tab ${filter === k ? 'on' : ''}" data-go="new/${k}">${l}</button>`).join('')}</div>`
-      + (albums.length ? shelf('آلبوم‌های تازه', albums.map((a) => card({ cover: coverHtml(a.cover), title: a.name, sub: esc(a.artist), go: `album/${encodeURIComponent(a.key)}` })).join('')) : '')
-      + (sections || '<p class="muted pad">در این بازه آهنگی اضافه نشده.</p>');
+      kicker: 'Smart playlist', title: 'Recently Added',
+      meta: `${songs(filtered.length)} • sorted by date added`, actions: playBtns('new'),
+    }) + `<div class="tabs">${[['all', 'All'], ['today', 'Today'], ['week', 'This week'], ['month', 'This month']].map(([k, l]) => `<button class="tab ${filter === k ? 'on' : ''}" data-go="new/${k}">${l}</button>`).join('')}</div>`
+      + (albums.length ? shelf('New albums', albums.map((a) => card({ cover: coverHtml(a.cover), title: a.name, sub: esc(a.artist), go: `album/${encodeURIComponent(a.key)}` })).join('')) : '')
+      + (sections || '<p class="muted pad">Nothing was added in this period.</p>');
   };
 
   views.countries = () => {
@@ -606,9 +606,9 @@
     const cs = countries();
     const total = S.tracks.size;
     const bar = cs.map((c) => `<div class="dist-seg" style="flex:${c.tracks.length};--h:${hash(c.code) % 360}" title="${esc(Country.name(c.code))}: ${num(c.tracks.length)}" data-go="country/${c.code}"></div>`).join('');
-    const legend = cs.slice(0, 8).map((c) => `<span class="legend"><i style="--h:${hash(c.code) % 360}"></i>${esc(Country.name(c.code))} ${fa(Math.round((c.tracks.length / total) * 100))}٪</span>`).join('');
-    const pending = detecting ? `<div class="note">${icon('radar')} آوا در حال بررسی کشور ${num(detecting)} خواننده‌ی دیگر است؛ این صفحه خودکار به‌روز می‌شود.</div>` : '';
-    return `<div class="page-head"><h1>${icon('globe')} کشورها</h1><p>آوا کشور هر آهنگ رو خودش تشخیص داده. اگه جایی اشتباه بود، روی پرچم آهنگ بزن و درستش کن.</p></div>
+    const legend = cs.slice(0, 8).map((c) => `<span class="legend"><i style="--h:${hash(c.code) % 360}"></i>${esc(Country.name(c.code))} ${Math.round((c.tracks.length / total) * 100)}%</span>`).join('');
+    const pending = detecting ? `<div class="note">${icon('radar')} Still checking the country of ${plural(detecting, 'more artist')}; this page updates automatically.</div>` : '';
+    return `<div class="page-head"><h1>${icon('globe')} Countries</h1><p>Music detected the country of every song on its own. If one looks wrong, tap the song's flag to fix it.</p></div>
       ${pending}
       <div class="dist">${bar}</div><div class="legends">${legend}</div>
       <div class="cgrid">${cs.map((c) => countryCard(c, true)).join('')}</div>`;
@@ -616,7 +616,7 @@
 
   views.country = (code) => {
     const tracks = sortTracks(all().filter((t) => t.country === code), 'artist');
-    if (!tracks.length) return `<p class="pad muted">آهنگی از این کشور نیست.</p>`;
+    if (!tracks.length) return `<p class="pad muted">No songs from this country.</p>`;
     const key = registerList('country-' + code, tracks);
     const arts = artistsList().filter((a) => a.tracks.some((t) => t.country === code));
     const albums = albumsList().filter((a) => a.tracks.some((t) => t.country === code));
@@ -627,37 +627,37 @@
     const latest = tracks.slice().sort((a, b) => b.addedAt - a.addedAt).slice(0, 12);
     registerList('cl-' + code, latest);
     return hero({
-      art: `<div class="hero-flag">${flagHtml(code, 'xl')}</div>`, kicker: 'کشور', title: esc(Country.name(code)),
-      meta: `${num(tracks.length)} آهنگ • ${num(arts.length)} خواننده${dur ? ' • ' + fmtLong(dur) : ''}<br><small class="muted">روش تشخیص — ${srcInfo}</small>`,
+      art: `<div class="hero-flag">${flagHtml(code, 'xl')}</div>`, kicker: 'Country', title: esc(Country.name(code)),
+      meta: `${songs(tracks.length)} • ${plural(arts.length, 'artist')}${dur ? ' • ' + fmtLong(dur) : ''}<br><small class="muted">Detected by — ${srcInfo}</small>`,
       actions: playBtns(key), bg: `hsl(${hash(code) % 360} 60% 35%)`,
     })
-      + shelf('خواننده‌ها', arts.map((a) => card({ cover: coverHtml(a.tracks.find((t) => t.coverId) || a.tracks[0], 'round-cover', a.name), title: a.name, sub: `${num(a.tracks.length)} آهنگ`, go: `artist/${encodeURIComponent(a.key)}`, round: true })).join(''))
-      + shelf('تازه‌ترین‌ها از این کشور', latest.map((t, i) => card({ cover: coverHtml(t), title: t.title, sub: esc(t.artist), play: `cl-${code}@${i}` })).join(''))
-      + (albums.length ? shelf('آلبوم‌ها', albums.map((a) => card({ cover: coverHtml(a.cover), title: a.name, sub: esc(a.artist), go: `album/${encodeURIComponent(a.key)}` })).join('')) : '')
-      + `<section class="shelf"><div class="shelf-head"><h2>همه‌ی آهنگ‌ها</h2></div>${trackRows(tracks, key)}</section>`;
+      + shelf('Artists', arts.map((a) => card({ cover: coverHtml(a.tracks.find((t) => t.coverId) || a.tracks[0], 'round-cover', a.name), title: a.name, sub: songs(a.tracks.length), go: `artist/${encodeURIComponent(a.key)}`, round: true })).join(''))
+      + shelf('Latest from this country', latest.map((t, i) => card({ cover: coverHtml(t), title: t.title, sub: esc(t.artist), play: `cl-${code}@${i}` })).join(''))
+      + (albums.length ? shelf('Albums', albums.map((a) => card({ cover: coverHtml(a.cover), title: a.name, sub: esc(a.artist), go: `album/${encodeURIComponent(a.key)}` })).join('')) : '')
+      + `<section class="shelf"><div class="shelf-head"><h2>All songs</h2></div>${trackRows(tracks, key)}</section>`;
   };
 
   views.library = (tab) => {
     tab = tab || 'songs';
     if (!S.tracks.size) return emptyState();
-    const tabs = [['songs', 'آهنگ‌ها'], ['artists', 'خواننده‌ها'], ['albums', 'آلبوم‌ها'], ['genres', 'ژانرها'], ['folders', 'پوشه‌ها']];
+    const tabs = [['songs', 'Songs'], ['artists', 'Artists'], ['albums', 'Albums'], ['genres', 'Genres'], ['folders', 'Folders']];
     let body = '';
     const sort = S.sort || 'added';
     if (tab === 'songs') {
       const tracks = sortTracks(all(), sort);
-      body = `<div class="toolbar"><span class="muted">${num(tracks.length)} آهنگ</span>
-        <label class="select">${icon('sort')}<select id="sort-select">${[['added', 'تاریخ اضافه شدن'], ['title', 'عنوان'], ['artist', 'خواننده'], ['album', 'آلبوم'], ['country', 'کشور'], ['plays', 'تعداد پخش'], ['duration', 'مدت'], ['year', 'سال']].map(([k, l]) => `<option value="${k}" ${k === sort ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
-        <button class="btn ghost" data-act="shuffle-key" data-key="lib">${icon('shuffle')} تصادفی</button></div>` + trackRows(tracks, 'lib');
+      body = `<div class="toolbar"><span class="muted">${songs(tracks.length)}</span>
+        <label class="select">${icon('sort')}<select id="sort-select">${[['added', 'Date added'], ['title', 'Title'], ['artist', 'Artist'], ['album', 'Album'], ['country', 'Country'], ['plays', 'Play count'], ['duration', 'Duration'], ['year', 'Year']].map(([k, l]) => `<option value="${k}" ${k === sort ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+        <button class="btn ghost" data-act="shuffle-key" data-key="lib">${icon('shuffle')} Shuffle</button></div>` + trackRows(tracks, 'lib');
     } else if (tab === 'artists') {
-      body = `<div class="grid">${artistsList().map((a) => card({ cover: coverHtml(a.tracks.find((t) => t.coverId) || a.tracks[0], 'round-cover', a.name), title: a.name, sub: `${flagHtml(a.country, 'xs')} ${num(a.tracks.length)} آهنگ`, go: `artist/${encodeURIComponent(a.key)}`, round: true })).join('')}</div>`;
+      body = `<div class="grid">${artistsList().map((a) => card({ cover: coverHtml(a.tracks.find((t) => t.coverId) || a.tracks[0], 'round-cover', a.name), title: a.name, sub: `${flagHtml(a.country, 'xs')} ${songs(a.tracks.length)}`, go: `artist/${encodeURIComponent(a.key)}`, round: true })).join('')}</div>`;
     } else if (tab === 'albums') {
-      const al = albumsList().sort((a, b) => new Intl.Collator('fa').compare(a.name, b.name));
-      body = al.length ? `<div class="grid">${al.map((a) => card({ cover: coverHtml(a.cover), title: a.name, sub: `${esc(a.artist)}${a.year ? ' • ' + fa(a.year) : ''}`, go: `album/${encodeURIComponent(a.key)}` })).join('')}</div>` : '<p class="muted pad">آهنگ‌هات اطلاعات آلبوم ندارن.</p>';
+      const al = albumsList().sort((a, b) => collator.compare(a.name, b.name));
+      body = al.length ? `<div class="grid">${al.map((a) => card({ cover: coverHtml(a.cover), title: a.name, sub: `${esc(a.artist)}${a.year ? ' • ' + a.year : ''}`, go: `album/${encodeURIComponent(a.key)}` })).join('')}</div>` : '<p class="muted pad">Your songs have no album info.</p>';
     } else if (tab === 'genres') {
-      const g = groupBy(all(), (t) => t.genre || 'بدون ژانر');
+      const g = groupBy(all(), (t) => t.genre || 'No genre');
       body = `<div class="ggrid">${Array.from(g.entries()).sort((a, b) => b[1].length - a[1].length).map(([name, ts]) => {
         const key = registerList('genre-' + name, ts);
-        return `<div class="gtile" style="--h:${hash(name) % 360}" data-act="play-key" data-key="${esc(key)}"><b>${esc(name)}</b><small>${num(ts.length)} آهنگ</small>${coverHtml(ts.find((t) => t.coverId) || ts[0], 'tilt')}</div>`;
+        return `<div class="gtile" style="--h:${hash(name) % 360}" data-act="play-key" data-key="${esc(key)}"><b>${esc(name)}</b><small>${songs(ts.length)}</small>${coverHtml(ts.find((t) => t.coverId) || ts[0], 'tilt')}</div>`;
       }).join('')}</div>`;
     } else if (tab === 'folders') {
       const g = groupBy(all(), (t) => t.path.split('/').slice(0, -1).join('/') || '/');
@@ -666,85 +666,85 @@
         return `<div class="frow" data-act="play-key" data-key="${esc(key)}">${icon('folder')}<div><b>${esc(p.split('/').pop() || p)}</b><small>${esc(p)}</small></div><span class="muted">${num(ts.length)}</span></div>`;
       }).join('')}</div>`;
     }
-    return `<div class="page-head"><h1>${icon('library')} کتابخانه</h1></div>
+    return `<div class="page-head"><h1>${icon('library')} Library</h1></div>
       <div class="tabs">${tabs.map(([k, l]) => `<button class="tab ${tab === k ? 'on' : ''}" data-go="library/${k}">${l}</button>`).join('')}</div>${body}`;
   };
 
   views.artist = (key) => {
     key = decodeURIComponent(key);
     const tracks = sortTracks(all().filter((t) => artistKey(t) === key), 'plays');
-    if (!tracks.length) return '<p class="pad muted">خواننده پیدا نشد.</p>';
+    if (!tracks.length) return '<p class="pad muted">Artist not found.</p>';
     const name = Country.primaryArtist(tracks[0].artist);
     const info = S.artists.get(key) || {};
     const code = tracks[0].country;
     const lkey = registerList('artist-' + key, tracks);
     const albums = albumsList().filter((a) => a.tracks.some((t) => artistKey(t) === key));
     const plays = tracks.reduce((s, t) => s + (t.plays || 0), 0);
-    const why = info.manual ? 'انتخاب شما' : (tracks[0].countryWhy || '');
+    const why = info.manual ? 'Your choice' : (tracks[0].countryWhy || '');
     return hero({
-      art: coverHtml(tracks.find((t) => t.coverId) || tracks[0], 'round-cover hero-cover', name), kicker: 'خواننده', title: esc(name),
-      meta: `<button class="chip country-chip big" data-act="artist-country" data-key="${esc(key)}">${flagHtml(code, 'sm')} ${esc(Country.name(code))} <small>• ${esc(why)}</small> ${icon('edit')}</button><br>${num(tracks.length)} آهنگ • ${num(plays)} بار پخش`,
+      art: coverHtml(tracks.find((t) => t.coverId) || tracks[0], 'round-cover hero-cover', name), kicker: 'Artist', title: esc(name),
+      meta: `<button class="chip country-chip big" data-act="artist-country" data-key="${esc(key)}">${flagHtml(code, 'sm')} ${esc(Country.name(code))} <small>• ${esc(why)}</small> ${icon('edit')}</button><br>${songs(tracks.length)} • ${plural(plays, 'play')}`,
       actions: playBtns(lkey),
-    }) + (albums.length ? shelf('آلبوم‌ها', albums.map((a) => card({ cover: coverHtml(a.cover), title: a.name, sub: a.year ? fa(a.year) : '', go: `album/${encodeURIComponent(a.key)}` })).join('')) : '')
-      + `<section class="shelf"><div class="shelf-head"><h2>آهنگ‌ها</h2></div>${trackRows(tracks, lkey)}</section>`;
+    }) + (albums.length ? shelf('Albums', albums.map((a) => card({ cover: coverHtml(a.cover), title: a.name, sub: a.year ? String(a.year) : '', go: `album/${encodeURIComponent(a.key)}` })).join('')) : '')
+      + `<section class="shelf"><div class="shelf-head"><h2>Songs</h2></div>${trackRows(tracks, lkey)}</section>`;
   };
 
   views.album = (key) => {
     key = decodeURIComponent(key);
     const a = albumsList().find((x) => x.key === key);
-    if (!a) return '<p class="pad muted">آلبوم پیدا نشد.</p>';
+    if (!a) return '<p class="pad muted">Album not found.</p>';
     const lkey = registerList('album-' + key, a.tracks);
     const dur = a.tracks.reduce((s, t) => s + (t.duration || 0), 0);
     return hero({
-      art: coverHtml(a.cover, 'hero-cover'), kicker: 'آلبوم', title: esc(a.name),
-      meta: `<a data-go="artist/${encodeURIComponent(artistKey(a.tracks[0]))}">${esc(a.artist)}</a> • ${countryChip(a.tracks[0])}<br>${a.year ? fa(a.year) + ' • ' : ''}${num(a.tracks.length)} آهنگ${dur ? ' • ' + fmtLong(dur) : ''}`,
+      art: coverHtml(a.cover, 'hero-cover'), kicker: 'Album', title: esc(a.name),
+      meta: `<a data-go="artist/${encodeURIComponent(artistKey(a.tracks[0]))}">${esc(a.artist)}</a> • ${countryChip(a.tracks[0])}<br>${a.year ? a.year + ' • ' : ''}${songs(a.tracks.length)}${dur ? ' • ' + fmtLong(dur) : ''}`,
       actions: playBtns(lkey),
     }) + trackRows(a.tracks, lkey, { showAlbum: false, numbered: true });
   };
 
   const SMART = {
-    liked: { name: 'آهنگ‌های پسندیده', icon: 'heart-fill', g: 'linear-gradient(135deg,#ec4899,#8b5cf6)', get: () => all().filter((t) => t.liked).sort((a, b) => (b.likedAt || 0) - (a.likedAt || 0)) },
-    top: { name: 'بیشترین پخش', icon: 'fire', g: 'linear-gradient(135deg,#f59e0b,#ef4444)', get: () => all().filter((t) => t.plays).sort((a, b) => b.plays - a.plays).slice(0, 100) },
-    recent: { name: 'اخیراً پخش‌شده', icon: 'clock', g: 'linear-gradient(135deg,#3b82f6,#8b5cf6)', get: () => { const s = new Set(); return S.history.map((id) => S.tracks.get(id)).filter((t) => t && !s.has(t.id) && s.add(t.id)); } },
-    never: { name: 'کشف دوباره', icon: 'compass', g: 'linear-gradient(135deg,#10b981,#06b6d4)', get: () => all().filter((t) => !t.plays).sort(() => Math.random() - 0.5) },
-    newmonth: { name: 'تازه‌های این ماه', icon: 'sparkle', g: 'linear-gradient(135deg,#06b6d4,#3b82f6)', get: () => byAdded().filter((t) => Date.now() - t.addedAt < 30 * 864e5) },
+    liked: { name: 'Liked Songs', icon: 'heart-fill', g: 'linear-gradient(135deg,#ec4899,#8b5cf6)', get: () => all().filter((t) => t.liked).sort((a, b) => (b.likedAt || 0) - (a.likedAt || 0)) },
+    top: { name: 'Most Played', icon: 'fire', g: 'linear-gradient(135deg,#f59e0b,#ef4444)', get: () => all().filter((t) => t.plays).sort((a, b) => b.plays - a.plays).slice(0, 100) },
+    recent: { name: 'Recently Played', icon: 'clock', g: 'linear-gradient(135deg,#3b82f6,#8b5cf6)', get: () => { const s = new Set(); return S.history.map((id) => S.tracks.get(id)).filter((t) => t && !s.has(t.id) && s.add(t.id)); } },
+    never: { name: 'Rediscover', icon: 'compass', g: 'linear-gradient(135deg,#10b981,#06b6d4)', get: () => all().filter((t) => !t.plays).sort(() => Math.random() - 0.5) },
+    newmonth: { name: 'New This Month', icon: 'sparkle', g: 'linear-gradient(135deg,#06b6d4,#3b82f6)', get: () => byAdded().filter((t) => Date.now() - t.addedAt < 30 * 864e5) },
   };
 
   views.playlists = () => {
     const smart = Object.entries(SMART).map(([k, p]) => {
       const n = p.get().length;
-      return card({ cover: `<div class="pl-art" style="background:${p.g}">${icon(p.icon)}</div>`, title: p.name, sub: `${num(n)} آهنگ • هوشمند`, go: `playlist/${k}` });
+      return card({ cover: `<div class="pl-art" style="background:${p.g}">${icon(p.icon)}</div>`, title: p.name, sub: `${songs(n)} • Smart`, go: `playlist/${k}` });
     }).join('');
     const mine = Array.from(S.playlists.values()).sort((a, b) => b.created - a.created).map((p) => {
       const ts = p.ids.map((id) => S.tracks.get(id)).filter(Boolean);
       const cv = ts.filter((t) => t.coverId).slice(0, 4);
       const art = cv.length >= 4 ? `<div class="mix-art">${cv.map((t) => coverHtml(t, 'q')).join('')}</div>` : `<div class="pl-art" style="background:linear-gradient(135deg,hsl(${hash(p.id) % 360} 70% 50%),hsl(${(hash(p.id) + 60) % 360} 70% 40%))">${icon('list')}</div>`;
-      return card({ cover: art, title: p.name, sub: `${num(ts.length)} آهنگ`, go: `playlist/${p.id}` });
+      return card({ cover: art, title: p.name, sub: songs(ts.length), go: `playlist/${p.id}` });
     }).join('');
-    return `<div class="page-head"><h1>${icon('list')} پلی‌لیست‌ها</h1><button class="btn primary" data-act="new-playlist">${icon('plus')} پلی‌لیست جدید</button></div>
-      <h2 class="sub-h">هوشمند</h2><div class="grid">${smart}</div>
-      <h2 class="sub-h">پلی‌لیست‌های من</h2>${mine ? `<div class="grid">${mine}</div>` : '<p class="muted pad">هنوز پلی‌لیستی نساختی. از منوی «⋯» هر آهنگ می‌تونی اضافه‌اش کنی.</p>'}`;
+    return `<div class="page-head"><h1>${icon('list')} Playlists</h1><button class="btn primary" data-act="new-playlist">${icon('plus')} New playlist</button></div>
+      <h2 class="sub-h">Smart playlists</h2><div class="grid">${smart}</div>
+      <h2 class="sub-h">My playlists</h2>${mine ? `<div class="grid">${mine}</div>` : '<p class="muted pad">No playlists yet. Use the "⋯" menu on any song to add it to one.</p>'}`;
   };
 
   views.playlist = (id) => {
     const smart = SMART[id];
     let tracks, name, art, kicker, actions = '';
     if (smart) {
-      tracks = smart.get(); name = smart.name; kicker = 'پلی‌لیست هوشمند';
+      tracks = smart.get(); name = smart.name; kicker = 'Smart playlist';
       art = `<div class="hero-icon" style="background:${smart.g}">${icon(smart.icon)}</div>`;
     } else {
       const p = S.playlists.get(id);
-      if (!p) return '<p class="pad muted">پلی‌لیست پیدا نشد.</p>';
-      tracks = p.ids.map((x) => S.tracks.get(x)).filter(Boolean); name = p.name; kicker = 'پلی‌لیست';
+      if (!p) return '<p class="pad muted">Playlist not found.</p>';
+      tracks = p.ids.map((x) => S.tracks.get(x)).filter(Boolean); name = p.name; kicker = 'Playlist';
       art = `<div class="hero-icon" style="background:linear-gradient(135deg,hsl(${hash(p.id) % 360} 70% 50%),hsl(${(hash(p.id) + 60) % 360} 70% 40%))">${icon('list')}</div>`;
-      actions = `<button class="icon-btn" data-act="rename-pl" data-id="${p.id}" title="تغییر نام">${icon('edit')}</button>
-        <button class="icon-btn" data-act="export-pl" data-id="${p.id}" title="خروجی M3U">${icon('download')}</button>
-        <button class="icon-btn" data-act="delete-pl" data-id="${p.id}" title="حذف">${icon('trash')}</button>`;
+      actions = `<button class="icon-btn" data-act="rename-pl" data-id="${p.id}" title="Rename">${icon('edit')}</button>
+        <button class="icon-btn" data-act="export-pl" data-id="${p.id}" title="Export M3U">${icon('download')}</button>
+        <button class="icon-btn" data-act="delete-pl" data-id="${p.id}" title="Delete">${icon('trash')}</button>`;
     }
     const key = registerList('pl-' + id, tracks);
     const dur = tracks.reduce((s, t) => s + (t.duration || 0), 0);
-    return hero({ art, kicker, title: esc(name), meta: `${num(tracks.length)} آهنگ${dur ? ' • ' + fmtLong(dur) : ''}`, actions: playBtns(key) + actions })
-      + (tracks.length ? trackRows(tracks, key, { showAdded: id === 'newmonth' }) : '<p class="muted pad">این پلی‌لیست خالیه.</p>');
+    return hero({ art, kicker, title: esc(name), meta: `${songs(tracks.length)}${dur ? ' • ' + fmtLong(dur) : ''}`, actions: playBtns(key) + actions })
+      + (tracks.length ? trackRows(tracks, key, { showAdded: id === 'newmonth' }) : '<p class="muted pad">This playlist is empty.</p>');
   };
 
   views.stats = () => {
@@ -760,21 +760,21 @@
     const dmax = Math.max(1, ...decades.map((d) => d[1].length));
     const playsByCountry = cs.map((c) => ({ code: c.code, plays: c.tracks.reduce((s, t) => s + (t.plays || 0), 0) })).filter((c) => c.plays).sort((a, b) => b.plays - a.plays).slice(0, 6);
     const pmax = Math.max(1, ...playsByCountry.map((p) => p.plays));
-    return `<div class="page-head"><h1>${icon('chart')} آمار شنیدن</h1></div>
+    return `<div class="page-head"><h1>${icon('chart')} Listening stats</h1></div>
       <div class="kpis">
-        <div class="kpi"><small>آهنگ</small><b>${num(tracks.length)}</b></div>
-        <div class="kpi"><small>خواننده</small><b>${num(artistsList().length)}</b></div>
-        <div class="kpi"><small>کشور</small><b>${num(cs.filter((c) => c.code !== 'ZZ').length)}</b></div>
-        <div class="kpi"><small>مدت کتابخانه</small><b>${fmtLong(dur)}</b></div>
-        <div class="kpi"><small>دفعات پخش</small><b>${num(plays)}</b></div>
-        <div class="kpi"><small>زمان گوش دادن</small><b>${fmtLong(S.listenSeconds)}</b></div>
+        <div class="kpi"><small>Songs</small><b>${num(tracks.length)}</b></div>
+        <div class="kpi"><small>Artists</small><b>${num(artistsList().length)}</b></div>
+        <div class="kpi"><small>Countries</small><b>${num(cs.filter((c) => c.code !== 'ZZ').length)}</b></div>
+        <div class="kpi"><small>Library length</small><b>${fmtLong(dur)}</b></div>
+        <div class="kpi"><small>Plays</small><b>${num(plays)}</b></div>
+        <div class="kpi"><small>Time listened</small><b>${fmtLong(S.listenSeconds)}</b></div>
       </div>
       <div class="panels">
-        <div class="panel"><h3>آهنگ‌ها بر اساس کشور</h3>${cs.slice(0, 12).map((c) => `<div class="hbar" data-go="country/${c.code}">${flagHtml(c.code, 'sm')}<span class="hbar-l">${esc(Country.name(c.code))}</span><div class="hbar-t"><i style="width:${(c.tracks.length / max) * 100}%;--h:${hash(c.code) % 360}"></i></div><b>${num(c.tracks.length)}</b></div>`).join('')}</div>
-        <div class="panel"><h3>بیشترین شنیده‌شده بر اساس کشور</h3>${playsByCountry.length ? playsByCountry.map((c) => `<div class="hbar">${flagHtml(c.code, 'sm')}<span class="hbar-l">${esc(Country.name(c.code))}</span><div class="hbar-t"><i style="width:${(c.plays / pmax) * 100}%;--h:${hash(c.code) % 360}"></i></div><b>${num(c.plays)}</b></div>`).join('') : '<p class="muted">هنوز چیزی پخش نکردی.</p>'}</div>
-        <div class="panel"><h3>خواننده‌های برتر</h3>${arts.map((a, i) => `<div class="rank" data-go="artist/${encodeURIComponent(a.key)}"><span class="rank-n">${fa(i + 1)}</span>${coverHtml(a.tracks.find((t) => t.coverId) || a.tracks[0], 'xs round-cover', a.name)}<div><b>${esc(a.name)}</b><small>${num(a.plays)} پخش • ${num(a.tracks.length)} آهنگ</small></div>${flagHtml(a.country, 'sm')}</div>`).join('')}</div>
-        ${decades.length ? `<div class="panel"><h3>دهه‌ها</h3><div class="vbars">${decades.map(([d, ts]) => `<div class="vbar"><i style="height:${(ts.length / dmax) * 100}%"></i><small>${fa(d)}</small></div>`).join('')}</div></div>` : ''}
-        ${genres.length ? `<div class="panel"><h3>ژانرها</h3>${genres.map(([g, ts]) => `<div class="hbar"><span class="hbar-l">${esc(g)}</span><div class="hbar-t"><i style="width:${(ts.length / genres[0][1].length) * 100}%;--h:${hash(g) % 360}"></i></div><b>${num(ts.length)}</b></div>`).join('')}</div>` : ''}
+        <div class="panel"><h3>Songs by country</h3>${cs.slice(0, 12).map((c) => `<div class="hbar" data-go="country/${c.code}">${flagHtml(c.code, 'sm')}<span class="hbar-l">${esc(Country.name(c.code))}</span><div class="hbar-t"><i style="width:${(c.tracks.length / max) * 100}%;--h:${hash(c.code) % 360}"></i></div><b>${num(c.tracks.length)}</b></div>`).join('')}</div>
+        <div class="panel"><h3>Most listened by country</h3>${playsByCountry.length ? playsByCountry.map((c) => `<div class="hbar">${flagHtml(c.code, 'sm')}<span class="hbar-l">${esc(Country.name(c.code))}</span><div class="hbar-t"><i style="width:${(c.plays / pmax) * 100}%;--h:${hash(c.code) % 360}"></i></div><b>${num(c.plays)}</b></div>`).join('') : '<p class="muted">You haven\'t played anything yet.</p>'}</div>
+        <div class="panel"><h3>Top artists</h3>${arts.map((a, i) => `<div class="rank" data-go="artist/${encodeURIComponent(a.key)}"><span class="rank-n">${i + 1}</span>${coverHtml(a.tracks.find((t) => t.coverId) || a.tracks[0], 'xs round-cover', a.name)}<div><b>${esc(a.name)}</b><small>${plural(a.plays, 'play')} • ${songs(a.tracks.length)}</small></div>${flagHtml(a.country, 'sm')}</div>`).join('')}</div>
+        ${decades.length ? `<div class="panel"><h3>Decades</h3><div class="vbars">${decades.map(([d, ts]) => `<div class="vbar"><i style="height:${(ts.length / dmax) * 100}%"></i><small>${d}s</small></div>`).join('')}</div></div>` : ''}
+        ${genres.length ? `<div class="panel"><h3>Genres</h3>${genres.map(([g, ts]) => `<div class="hbar"><span class="hbar-l">${esc(g)}</span><div class="hbar-t"><i style="width:${(ts.length / genres[0][1].length) * 100}%;--h:${hash(g) % 360}"></i></div><b>${num(ts.length)}</b></div>`).join('')}</div>` : ''}
       </div>`;
   };
 
@@ -782,21 +782,21 @@
     q = decodeURIComponent(q || '').trim();
     if (!q) {
       const cs = countries();
-      return `<div class="page-head"><h1>${icon('search')} جستجو</h1></div>
-        <h2 class="sub-h">مرور کشورها</h2><div class="ggrid">${cs.map((c) => `<div class="gtile" style="--h:${hash(c.code) % 360}" data-go="country/${c.code}"><b>${esc(Country.name(c.code))}</b><small>${num(c.tracks.length)} آهنگ</small><div class="gtile-flag">${flagHtml(c.code, 'lg')}</div></div>`).join('')}</div>`;
+      return `<div class="page-head"><h1>${icon('search')} Search</h1></div>
+        <h2 class="sub-h">Browse countries</h2><div class="ggrid">${cs.map((c) => `<div class="gtile" style="--h:${hash(c.code) % 360}" data-go="country/${c.code}"><b>${esc(Country.name(c.code))}</b><small>${songs(c.tracks.length)}</small><div class="gtile-flag">${flagHtml(c.code, 'lg')}</div></div>`).join('')}</div>`;
     }
     const n = Country.norm(q);
     const match = (s) => Country.norm(s).includes(n);
-    const tracks = all().filter((t) => match(t.title) || match(t.artist) || match(t.album) || match(t.genre) || match(Country.name(t.country)) || match(Country.enName(t.country)));
+    const tracks = all().filter((t) => match(t.title) || match(t.artist) || match(t.album) || match(t.genre) || match(Country.name(t.country)));
     const arts = artistsList().filter((a) => match(a.name));
     const albums = albumsList().filter((a) => match(a.name));
-    const cs = countries().filter((c) => match(Country.name(c.code)) || match(Country.enName(c.code)));
-    if (!tracks.length && !arts.length) return `<div class="pad muted center">برای «${esc(q)}» چیزی پیدا نشد.</div>`;
-    return `<div class="page-head"><h1>نتایج «${esc(q)}»</h1></div>`
+    const cs = countries().filter((c) => match(Country.name(c.code)) || match(c.code));
+    if (!tracks.length && !arts.length && !cs.length) return `<div class="pad muted center">Nothing found for "${esc(q)}".</div>`;
+    return `<div class="page-head"><h1>Results for "${esc(q)}"</h1></div>`
       + (cs.length ? `<div class="cgrid">${cs.map((c) => countryCard(c, true)).join('')}</div>` : '')
-      + (arts.length ? shelf('خواننده‌ها', arts.slice(0, 20).map((a) => card({ cover: coverHtml(a.tracks.find((t) => t.coverId) || a.tracks[0], 'round-cover', a.name), title: a.name, sub: `${num(a.tracks.length)} آهنگ`, go: `artist/${encodeURIComponent(a.key)}`, round: true })).join('')) : '')
-      + (albums.length ? shelf('آلبوم‌ها', albums.slice(0, 20).map((a) => card({ cover: coverHtml(a.cover), title: a.name, sub: esc(a.artist), go: `album/${encodeURIComponent(a.key)}` })).join('')) : '')
-      + (tracks.length ? `<section class="shelf"><div class="shelf-head"><h2>آهنگ‌ها <small class="muted">${num(tracks.length)}</small></h2></div>${trackRows(tracks, 'search')}</section>` : '');
+      + (arts.length ? shelf('Artists', arts.slice(0, 20).map((a) => card({ cover: coverHtml(a.tracks.find((t) => t.coverId) || a.tracks[0], 'round-cover', a.name), title: a.name, sub: songs(a.tracks.length), go: `artist/${encodeURIComponent(a.key)}`, round: true })).join('')) : '')
+      + (albums.length ? shelf('Albums', albums.slice(0, 20).map((a) => card({ cover: coverHtml(a.cover), title: a.name, sub: esc(a.artist), go: `album/${encodeURIComponent(a.key)}` })).join('')) : '')
+      + (tracks.length ? `<section class="shelf"><div class="shelf-head"><h2>Songs <small class="muted">${num(tracks.length)}</small></h2></div>${trackRows(tracks, 'search')}</section>` : '');
   };
 
   views.settings = () => {
@@ -805,49 +805,49 @@
     const known = Array.from(S.artists.values());
     const srcStats = {};
     for (const t of S.tracks.values()) srcStats[t.countrySource] = (srcStats[t.countrySource] || 0) + 1;
-    return `<div class="page-head"><h1>${icon('gear')} تنظیمات</h1></div>
+    return `<div class="page-head"><h1>${icon('gear')} Settings</h1></div>
       <div class="settings">
-        <section class="set-card"><h3>${icon('folder')} کتابخانه</h3>
-          <p class="muted">${num(S.tracks.size)} آهنگ • ${S.dirs.length ? 'پوشه‌ها: ' + S.dirs.map((d) => esc(d.name)).join('، ') : 'پوشه‌ی متصلی نیست'}</p>
-          <div class="btn-row"><button class="btn primary" data-act="add-folder">${icon('folder')} افزودن پوشه</button>
-          <button class="btn ghost" data-act="add-files">${icon('plus')} افزودن آهنگ</button>
-          ${S.dirs.length ? `<button class="btn ghost" data-act="rescan">${icon('refresh')} اسکن دوباره</button>` : ''}
-          <button class="btn danger" data-act="clear-lib">${icon('trash')} پاک کردن کتابخانه</button></div>
-          <label class="switch"><input type="checkbox" data-set="keepCopies" ${st.keepCopies ? 'checked' : ''}><span></span><div><b>ذخیره‌ی آفلاین داخل اپ</b><small>یک کپی از آهنگ‌های جدید داخل حافظه‌ی مرورگر نگه داشته می‌شه تا بعد از بستن اپ هم بدون انتخاب دوباره‌ی پوشه پخش بشن (مخصوص موبایل و آیفون).</small></div></label>
+        <section class="set-card"><h3>${icon('folder')} Library</h3>
+          <p class="muted">${songs(S.tracks.size)} • ${S.dirs.length ? 'Folders: ' + S.dirs.map((d) => esc(d.name)).join(', ') : 'No folder connected'}</p>
+          <div class="btn-row"><button class="btn primary" data-act="add-folder">${icon('folder')} Add folder</button>
+          <button class="btn ghost" data-act="add-files">${icon('plus')} Add songs</button>
+          ${S.dirs.length ? `<button class="btn ghost" data-act="rescan">${icon('refresh')} Rescan</button>` : ''}
+          <button class="btn danger" data-act="clear-lib">${icon('trash')} Clear library</button></div>
+          <label class="switch"><input type="checkbox" data-set="keepCopies" ${st.keepCopies ? 'checked' : ''}><span></span><div><b>Keep offline copies in the app</b><small>A copy of newly added songs is stored in the browser, so they still play after you close the app without picking the folder again (handy on phones and iPhone).</small></div></label>
         </section>
-        <section class="set-card"><h3>${icon('globe')} تشخیص کشور</h3>
+        <section class="set-card"><h3>${icon('globe')} Country detection</h3>
           <p class="muted">${Object.entries(srcStats).map(([k, v]) => `${SOURCE_LABEL[k] || k}: ${num(v)}`).join(' • ') || '—'}</p>
-          <label class="switch"><input type="checkbox" data-set="online" ${st.online ? 'checked' : ''}><span></span><div><b>جستجوی آنلاین در MusicBrainz</b><small>برای خواننده‌هایی که در پایگاه داده‌ی داخلی نیستن، کشورشون از دانشنامه‌ی آزاد موسیقی MusicBrainz پرسیده می‌شه (فقط نام خواننده ارسال می‌شه).</small></div></label>
-          <div class="btn-row"><button class="btn ghost" data-act="redetect">${icon('radar')} تشخیص دوباره‌ی همه</button></div>
-          <p class="muted small">${num(known.filter((a) => a.manual).length)} خواننده با انتخاب دستی</p>
+          <label class="switch"><input type="checkbox" data-set="online" ${st.online ? 'checked' : ''}><span></span><div><b>Look up artists on MusicBrainz</b><small>For artists not in the built-in database, the country is looked up in the free MusicBrainz music encyclopedia (only the artist name is sent).</small></div></label>
+          <div class="btn-row"><button class="btn ghost" data-act="redetect">${icon('radar')} Re-detect everything</button></div>
+          <p class="muted small">${plural(known.filter((a) => a.manual).length, 'artist')} set manually</p>
         </section>
-        <section class="set-card"><h3>${icon('palette')} ظاهر</h3>
+        <section class="set-card"><h3>${icon('palette')} Appearance</h3>
           <div class="swatches">${accents.map((c) => `<button class="swatch ${st.accent === c ? 'on' : ''}" style="background:${c}" data-accent="${c}"></button>`).join('')}<input type="color" value="${st.accent}" id="accent-pick"></div>
-          <div class="seg">${[['dark', 'تیره'], ['light', 'روشن'], ['auto', 'خودکار']].map(([k, l]) => `<button class="${st.theme === k ? 'on' : ''}" data-theme="${k}">${l}</button>`).join('')}</div>
-          <label class="switch"><input type="checkbox" data-set="dynamic" ${st.dynamic ? 'checked' : ''}><span></span><div><b>رنگ پویا از کاور آهنگ</b><small>رنگ پس‌زمینه با کاور آهنگ در حال پخش هماهنگ می‌شه.</small></div></label>
-          <label class="switch"><input type="checkbox" data-set="visualizer" ${st.visualizer ? 'checked' : ''}><span></span><div><b>ویژوالایزر</b><small>نمایش موج صدا در صفحه‌ی در حال پخش</small></div></label>
+          <div class="seg">${[['dark', 'Dark'], ['light', 'Light'], ['auto', 'Auto']].map(([k, l]) => `<button class="${st.theme === k ? 'on' : ''}" data-theme="${k}">${l}</button>`).join('')}</div>
+          <label class="switch"><input type="checkbox" data-set="dynamic" ${st.dynamic ? 'checked' : ''}><span></span><div><b>Dynamic colours from cover art</b><small>The background follows the cover of the song that's playing.</small></div></label>
+          <label class="switch"><input type="checkbox" data-set="visualizer" ${st.visualizer ? 'checked' : ''}><span></span><div><b>Visualizer</b><small>Show audio bars on the Now Playing screen.</small></div></label>
         </section>
-        <section class="set-card"><h3>${icon('sliders')} اکولایزر</h3>${eqHtml()}</section>
-        <section class="set-card"><h3>${icon('download')} پشتیبان‌گیری</h3>
-          <p class="muted">لایک‌ها، پلی‌لیست‌ها، آمار پخش و کشورهای انتخابی‌ات رو ذخیره یا بازیابی کن.</p>
-          <div class="btn-row"><button class="btn ghost" data-act="export">${icon('download')} خروجی گرفتن</button><button class="btn ghost" data-act="import">${icon('upload')} بازیابی</button></div>
+        <section class="set-card"><h3>${icon('sliders')} Equalizer</h3>${eqHtml()}</section>
+        <section class="set-card"><h3>${icon('download')} Backup</h3>
+          <p class="muted">Save or restore your likes, playlists, play counts and country choices.</p>
+          <div class="btn-row"><button class="btn ghost" data-act="export">${icon('download')} Export</button><button class="btn ghost" data-act="import">${icon('upload')} Restore</button></div>
         </section>
-        <section class="set-card"><h3>${icon('keyboard')} میانبرهای صفحه‌کلید</h3>
-          <div class="keys">${[['Space', 'پخش / توقف'], ['→ / ←', '۱۰ ثانیه جلو / عقب'], ['Shift + → / ←', 'آهنگ بعدی / قبلی'], ['↑ / ↓', 'صدا'], ['L', 'پسندیدن'], ['S', 'تصادفی'], ['R', 'تکرار'], ['M', 'بی‌صدا'], ['F', 'صفحه‌ی در حال پخش'], ['/', 'جستجو']].map(([k, d]) => `<div><kbd>${k}</kbd><span>${d}</span></div>`).join('')}</div>
+        <section class="set-card"><h3>${icon('keyboard')} Keyboard shortcuts</h3>
+          <div class="keys">${[['Space', 'Play / pause'], ['→ / ←', 'Seek ±10 s'], ['Shift + → / ←', 'Next / previous'], ['↑ / ↓', 'Volume'], ['L', 'Like'], ['S', 'Shuffle'], ['R', 'Repeat'], ['M', 'Mute'], ['F', 'Now Playing'], ['/', 'Search']].map(([k, d]) => `<div><kbd>${k}</kbd><span>${d}</span></div>`).join('')}</div>
         </section>
-        <section class="set-card about"><h3>درباره‌ی آوا</h3><p class="muted">آوا کاملاً روی دستگاه خودت اجرا می‌شه. آهنگ‌ها هیچ‌وقت آپلود نمی‌شن. نسخه‌ی ۱٫۰</p></section>
+        <section class="set-card about"><h3>About Music</h3><p class="muted">Music runs entirely on your device. Your songs are never uploaded. Version 1.0</p></section>
       </div>`;
   };
 
   function eqHtml() {
     const g = S.settings.eq;
-    const label = (f) => f >= 1000 ? fa(f / 1000) + 'k' : fa(f);
+    const label = (f) => f >= 1000 ? f / 1000 + 'k' : f;
     return `<div class="eq-presets">${Object.keys(Player.EQ_PRESETS).map((p) => `<button class="chip ${S.settings.eqPreset === p ? 'on' : ''}" data-eqp="${p}">${p}</button>`).join('')}</div>
       <div class="eq">${Player.EQ_BANDS.map((f, i) => `<div class="eq-band"><input type="range" min="-12" max="12" step="1" value="${g[i]}" data-eq="${i}" orient="vertical"><small>${label(f)}</small></div>`).join('')}</div>`;
   }
 
   /* =========================================================
-   * مسیریابی
+   * Routing
    * ========================================================= */
   let currentRoute = '';
   function route() {
@@ -864,7 +864,7 @@
   }
   function render() { route(); }
   const softRefresh = debounce(() => {
-    // بدون پریدن اسکرول صفحه را به‌روز کن
+    // Re-render without losing the scroll position
     if (document.activeElement && document.activeElement.closest('#view input, #view select')) return;
     const view = $('#view');
     const top = view.scrollTop;
@@ -905,7 +905,7 @@
   function go(path) { location.hash = '#/' + path; }
 
   /* =========================================================
-   * منوها و دیالوگ‌ها
+   * Menus & dialogs
    * ========================================================= */
   function closeMenu() { $('#menu').hidden = true; }
   function openMenu(x, y, items) {
@@ -932,18 +932,18 @@
     const t = S.tracks.get(id);
     if (!t) return;
     openMenu(x, y, [
-      { icon: 'play', label: 'پخش', run: () => Player.playList([id]) },
-      { icon: 'next-up', label: 'پخش بعدی', run: () => { Player.playNext(id); toast('بعد از این آهنگ پخش می‌شه'); } },
-      { icon: 'queue', label: 'افزودن به صف', run: () => { Player.addToQueue(id); toast('به صف اضافه شد'); } },
+      { icon: 'play', label: 'Play', run: () => Player.playList([id]) },
+      { icon: 'next-up', label: 'Play next', run: () => { Player.playNext(id); toast('Will play after this song'); } },
+      { icon: 'queue', label: 'Add to queue', run: () => { Player.addToQueue(id); toast('Added to queue'); } },
       '-',
-      { icon: t.liked ? 'heart-fill' : 'heart', label: t.liked ? 'حذف از پسندیده‌ها' : 'پسندیدن', run: () => toggleLike(id) },
-      { icon: 'list', label: 'افزودن به پلی‌لیست…', run: () => addToPlaylistDialog([id]) },
+      { icon: t.liked ? 'heart-fill' : 'heart', label: t.liked ? 'Remove from Liked Songs' : 'Like', run: () => toggleLike(id) },
+      { icon: 'list', label: 'Add to playlist…', run: () => addToPlaylistDialog([id]) },
       '-',
-      { icon: 'flag', label: `تغییر کشور (${Country.name(t.country)})…`, run: () => countryDialog(t) },
-      { icon: 'mic', label: 'رفتن به خواننده', run: () => go('artist/' + encodeURIComponent(artistKey(t))) },
-      ...(t.album ? [{ icon: 'disc', label: 'رفتن به آلبوم', run: () => go('album/' + encodeURIComponent(albumKeyOf(t))) }] : []),
-      { icon: 'globe', label: `رفتن به ${Country.name(t.country)}`, run: () => go('country/' + t.country) },
-      { icon: 'info', label: 'اطلاعات آهنگ', run: () => infoDialog(t) },
+      { icon: 'flag', label: `Change country (${Country.name(t.country)})…`, run: () => countryDialog(t) },
+      { icon: 'mic', label: 'Go to artist', run: () => go('artist/' + encodeURIComponent(artistKey(t))) },
+      ...(t.album ? [{ icon: 'disc', label: 'Go to album', run: () => go('album/' + encodeURIComponent(albumKeyOf(t))) }] : []),
+      { icon: 'globe', label: `Go to ${Country.name(t.country)}`, run: () => go('country/' + t.country) },
+      { icon: 'info', label: 'Song info', run: () => infoDialog(t) },
     ]);
   }
 
@@ -959,28 +959,29 @@
   function allCountryCodes() {
     const set = new Set(Object.keys(window.KNOWN_ARTISTS));
     const A = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    const dn = new Intl.DisplayNames(['en'], { type: 'region' });
     for (const a of A) for (const b of A) {
       const c = a + b;
-      try { const n = new Intl.DisplayNames(['en'], { type: 'region' }).of(c); if (n && n !== c && !/^\d/.test(n)) set.add(c); } catch (e) {}
+      try { const n = dn.of(c); if (n && n !== c && !/^\d/.test(n)) set.add(c); } catch (e) {}
     }
     ['EU', 'UN', 'EZ', 'QO', 'XA', 'XB', 'ZZ', 'AQ', 'BV', 'HM', 'TF', 'UM', 'IO', 'DG', 'EA', 'IC', 'CP', 'TA', 'AC', 'CQ'].forEach((c) => set.delete(c));
     set.add('XA');
-    return Array.from(set).sort((a, b) => new Intl.Collator('fa').compare(Country.name(a), Country.name(b)));
+    return Array.from(set).sort((a, b) => collator.compare(Country.name(a), Country.name(b)));
   }
   let codesCache;
 
   function countryDialog(t, artistOnlyKey) {
     codesCache = codesCache || allCountryCodes();
     const key = artistOnlyKey || artistKey(t);
-    const name = t ? Country.primaryArtist(t.artist) : (S.artists.get(key) && key);
+    const name = t ? Country.primaryArtist(t.artist) : key;
     const cur = t ? t.country : null;
     const used = countries().map((c) => c.code).filter((c) => c !== 'ZZ');
-    const d = dialog(`<h2>${icon('flag')} انتخاب کشور</h2>
-      ${t ? `<p class="muted">${esc(t.title)} — ${esc(t.artist)}</p><p class="why">تشخیص فعلی: ${flagHtml(t.country, 'sm')} <b>${esc(Country.name(t.country))}</b> <small>(${esc(SOURCE_LABEL[t.countrySource] || '')}: ${esc(t.countryWhy)})</small></p>` : ''}
-      ${t ? `<div class="seg scope"><button class="on" data-scope="artist">همه‌ی آهنگ‌های «${esc(name)}»</button><button data-scope="track">فقط این آهنگ</button></div>` : ''}
-      <input class="input" id="cq" placeholder="جستجوی کشور…" autocomplete="off">
-      <div class="clist">${[...used, ...codesCache.filter((c) => !used.includes(c))].map((c) => `<button class="citem ${c === cur ? 'on' : ''}" data-code="${c}" data-s="${esc(Country.name(c) + ' ' + Country.enName(c) + ' ' + c)}">${flagHtml(c, 'sm')}<span>${esc(Country.name(c))}</span><small>${esc(Country.enName(c))}</small></button>`).join('')}</div>
-      <div class="btn-row"><button class="btn ghost" data-reset>${icon('refresh')} برگرداندن به تشخیص خودکار</button></div>`);
+    const d = dialog(`<h2>${icon('flag')} Choose country</h2>
+      ${t ? `<p class="muted">${esc(t.title)} — ${esc(t.artist)}</p><p class="why">Currently: ${flagHtml(t.country, 'sm')} <b>${esc(Country.name(t.country))}</b> <small>(${esc(SOURCE_LABEL[t.countrySource] || '')}: ${esc(t.countryWhy)})</small></p>` : ''}
+      ${t ? `<div class="seg scope"><button class="on" data-scope="artist">All songs by "${esc(name)}"</button><button data-scope="track">Only this song</button></div>` : ''}
+      <input class="input" id="cq" placeholder="Search countries…" autocomplete="off">
+      <div class="clist">${[...used, ...codesCache.filter((c) => !used.includes(c))].map((c) => `<button class="citem ${c === cur ? 'on' : ''}" data-code="${c}" data-s="${esc(Country.name(c) + ' ' + c)}">${flagHtml(c, 'sm')}<span>${esc(Country.name(c))}</span><small>${c}</small></button>`).join('')}</div>
+      <div class="btn-row"><button class="btn ghost" data-reset>${icon('refresh')} Reset to automatic detection</button></div>`);
     let scope = 'artist';
     const q = $('#cq', d);
     q.focus();
@@ -1006,13 +1007,13 @@
       t.manualCountry = code || null;
       resolveCountry(t); queueSave(t);
     } else {
-      if (code) S.artists.set(key, { country: code, manual: true, source: 'manual', why: 'انتخاب شما', confidence: 1, checked: true });
+      if (code) S.artists.set(key, { country: code, manual: true, source: 'manual', why: 'Your choice', confidence: 1, checked: true });
       else {
         S.artists.delete(key);
         const sample = all().find((x) => artistKey(x) === key);
         if (sample) {
           const known = Country.lookupKnown(Country.primaryArtist(sample.artist));
-          if (known) S.artists.set(key, { country: known, source: 'db', why: 'شناخته‌شده در پایگاه داده‌ی آوا', confidence: 0.95, checked: true });
+          if (known) S.artists.set(key, { country: known, source: 'db', why: KNOWN_WHY, confidence: 0.95, checked: true });
           else if (S.settings.online) {
             Country.lookupOnline(Country.primaryArtist(sample.artist)).then((r) => {
               if (r && !r.error) { S.artists.set(key, { ...r, checked: true }); saveArtists(); recomputeAll(); }
@@ -1023,39 +1024,39 @@
       saveArtists();
       for (const x of all()) if (artistKey(x) === key) { if (code) x.manualCountry = null; resolveCountry(x); queueSave(x); }
     }
-    toast(code ? `کشور به «${Country.name(code)}» تغییر کرد` : 'به تشخیص خودکار برگشت');
+    toast(code ? `Country changed to ${Country.name(code)}` : 'Back to automatic detection');
     softRefresh();
     updateNowPlaying();
   }
 
   function infoDialog(t) {
     const rows = [
-      ['عنوان', t.title], ['خواننده', t.artist], ['آلبوم', t.album], ['ژانر', t.genre], ['سال', t.year && fa(t.year)],
-      ['کشور', `${Country.emoji(t.country)} ${Country.name(t.country)}`], ['روش تشخیص', `${SOURCE_LABEL[t.countrySource] || ''} — ${t.countryWhy}`],
-      ['اطمینان', `${fa(Math.round((t.countryConf || 0) * 100))}٪`], ['مدت', t.duration ? fmtTime(t.duration) : ''],
-      ['تعداد پخش', num(t.plays || 0)], ['اضافه شده', new Date(t.addedAt).toLocaleDateString('fa-IR')],
-      ['حجم', fa((t.size / 1048576).toFixed(1)) + ' مگابایت'], ['مسیر', t.path],
+      ['Title', t.title], ['Artist', t.artist], ['Album', t.album], ['Genre', t.genre], ['Year', t.year],
+      ['Country', `${Country.emoji(t.country)} ${Country.name(t.country)}`], ['Detected by', `${SOURCE_LABEL[t.countrySource] || ''} — ${t.countryWhy}`],
+      ['Confidence', `${Math.round((t.countryConf || 0) * 100)}%`], ['Duration', t.duration ? fmtTime(t.duration) : ''],
+      ['Plays', num(t.plays || 0)], ['Added', new Date(t.addedAt).toLocaleDateString('en-US', { dateStyle: 'medium' })],
+      ['Size', (t.size / 1048576).toFixed(1) + ' MB'], ['Path', t.path],
     ].filter((r) => r[1]);
     dialog(`<div class="info-head">${coverHtml(t, 'md')}<div><h2>${esc(t.title)}</h2><p class="muted">${esc(t.artist)}</p></div></div>
       <table class="info">${rows.map(([k, v]) => `<tr><th>${k}</th><td>${esc(v)}</td></tr>`).join('')}</table>
-      ${t.lyrics ? `<h3>متن آهنگ</h3><pre class="lyrics-pre">${esc(t.lyrics)}</pre>` : ''}`);
+      ${t.lyrics ? `<h3>Lyrics</h3><pre class="lyrics-pre">${esc(t.lyrics)}</pre>` : ''}`);
     hydrateCovers($('#dialog'));
   }
 
   function addToPlaylistDialog(ids) {
     const pls = Array.from(S.playlists.values());
-    const d = dialog(`<h2>${icon('list')} افزودن به پلی‌لیست</h2>
-      <div class="new-pl"><input class="input" id="npl" placeholder="نام پلی‌لیست جدید"><button class="btn primary" id="npl-b">${icon('plus')} بساز</button></div>
-      <div class="pl-pick">${pls.map((p) => `<button data-pl="${p.id}">${icon('list')}<span>${esc(p.name)}</span><small>${num(p.ids.length)}</small></button>`).join('') || '<p class="muted">هنوز پلی‌لیستی نداری.</p>'}</div>`);
+    const d = dialog(`<h2>${icon('list')} Add to playlist</h2>
+      <div class="new-pl"><input class="input" id="npl" placeholder="New playlist name"><button class="btn primary" id="npl-b">${icon('plus')} Create</button></div>
+      <div class="pl-pick">${pls.map((p) => `<button data-pl="${p.id}">${icon('list')}<span>${esc(p.name)}</span><small>${num(p.ids.length)}</small></button>`).join('') || '<p class="muted">You have no playlists yet.</p>'}</div>`);
     const add = (p) => {
       const before = p.ids.length;
       for (const id of ids) if (!p.ids.includes(id)) p.ids.push(id);
       savePlaylists();
-      toast(p.ids.length > before ? `به «${p.name}» اضافه شد` : 'از قبل در این پلی‌لیست بود');
+      toast(p.ids.length > before ? `Added to "${p.name}"` : 'Already in this playlist');
       closeDialog(); softRefresh();
     };
     $('#npl-b', d).onclick = () => {
-      const name = $('#npl', d).value.trim() || `پلی‌لیست ${num(S.playlists.size + 1)}`;
+      const name = $('#npl', d).value.trim() || `Playlist ${S.playlists.size + 1}`;
       const p = { id: 'p' + Date.now().toString(36), name, ids: [], created: Date.now() };
       S.playlists.set(p.id, p); add(p);
     };
@@ -1063,19 +1064,19 @@
   }
 
   function promptDialog(title, value, cb) {
-    const d = dialog(`<h2>${title}</h2><input class="input" id="pd" value="${esc(value || '')}"><div class="btn-row"><button class="btn primary" id="pd-ok">تایید</button><button class="btn ghost" data-close>انصراف</button></div>`);
+    const d = dialog(`<h2>${title}</h2><input class="input" id="pd" value="${esc(value || '')}"><div class="btn-row"><button class="btn primary" id="pd-ok">OK</button><button class="btn ghost" data-close>Cancel</button></div>`);
     const i = $('#pd', d); i.focus(); i.select();
     const ok = () => { cb(i.value.trim()); closeDialog(); };
     $('#pd-ok', d).onclick = ok;
     i.onkeydown = (e) => { if (e.key === 'Enter') ok(); };
   }
   function confirmDialog(text, cb) {
-    const d = dialog(`<h2>مطمئنی؟</h2><p>${text}</p><div class="btn-row"><button class="btn danger" id="cf-ok">بله</button><button class="btn ghost" data-close>انصراف</button></div>`);
+    const d = dialog(`<h2>Are you sure?</h2><p>${text}</p><div class="btn-row"><button class="btn danger" id="cf-ok">Yes</button><button class="btn ghost" data-close>Cancel</button></div>`);
     $('#cf-ok', d).onclick = () => { closeDialog(); cb(); };
   }
 
   /* =========================================================
-   * لایک و پخش
+   * Likes & playback
    * ========================================================= */
   function toggleLike(id) {
     const t = S.tracks.get(id);
@@ -1085,7 +1086,7 @@
     queueSave(t);
     for (const b of $$(`[data-like-id="${id}"]`)) { b.classList.toggle('on', t.liked); b.innerHTML = icon(t.liked ? 'heart-fill' : 'heart'); }
     if (Player.current === id) updateNowPlaying();
-    toast(t.liked ? 'به پسندیده‌ها اضافه شد ❤️' : 'از پسندیده‌ها حذف شد');
+    toast(t.liked ? 'Added to Liked Songs ❤️' : 'Removed from Liked Songs');
   }
 
   function playKey(key, { shuffle = false } = {}) {
@@ -1105,7 +1106,7 @@
   }
 
   /* =========================================================
-   * پخش‌کننده (رابط)
+   * Player UI
    * ========================================================= */
   let playCounted = false, lastTime = 0;
   function updateNowPlaying() {
@@ -1120,14 +1121,13 @@
       el.style.backgroundImage = '';
       el.classList.remove('has-img');
       el.style.setProperty('--h', hash(t.album || t.artist || t.title) % 360);
-      el.querySelector('span').textContent = (t.album || t.title || '♪').charAt(0);
+      el.querySelector('span').textContent = (t.album || t.title || '♪').charAt(0).toUpperCase();
       if (t.coverId) loadCoverInto(el);
     }
     for (const el of $$('[data-np="country"]')) el.innerHTML = countryChip(t);
     for (const el of $$('[data-np="like"]')) { el.dataset.likeId = t.id; el.classList.toggle('on', !!t.liked); el.innerHTML = icon(t.liked ? 'heart-fill' : 'heart'); }
-    const np = $('#np');
-    np.querySelector('.np-album').textContent = t.album ? `از آلبوم ${t.album}` : '';
-    document.title = `${t.title} • ${t.artist} — آوا`;
+    $('#np .np-album').textContent = t.album ? `from ${t.album}` : '';
+    document.title = `${t.title} • ${t.artist} — Music`;
     applyDynamicColor(t);
     getCoverUrl(t.coverId).then((u) => Player.setMediaSession(t, u));
     renderLyrics(t);
@@ -1144,7 +1144,7 @@
       const h = hash(t.album || t.artist || t.title) % 360;
       document.documentElement.style.setProperty('--dyn', `hsl(${h} 55% 40%)`);
     } else if (rgb) {
-      // روشنایی رنگ را متعادل کن
+      // keep the colour's brightness in a pleasant range
       const [r, g, b] = rgb;
       const l = (Math.max(r, g, b) + Math.min(r, g, b)) / 2;
       const k = l < 60 ? 1.8 : l > 180 ? 0.6 : 1;
@@ -1154,7 +1154,7 @@
 
   function renderLyrics(t) {
     const el = $('#np-lyrics');
-    if (!t || !t.lyrics) { el.innerHTML = `<div class="muted center pad">${icon('lyrics')}<p>متن این آهنگ در فایلش ذخیره نشده.</p></div>`; return; }
+    if (!t || !t.lyrics) { el.innerHTML = `<div class="muted center pad">${icon('lyrics')}<p>No lyrics are stored in this file.</p></div>`; return; }
     el.innerHTML = `<div class="lyrics">${t.lyrics.split(/\r?\n/).map((l) => `<p>${esc(l.replace(/^\[\d+:\d+(\.\d+)?\]/, '')) || '&nbsp;'}</p>`).join('')}</div>`;
   }
 
@@ -1164,8 +1164,8 @@
     const items = Player.queue.map((id, i) => ({ t: S.tracks.get(id), i })).filter((x) => x.t);
     const cur = items.find((x) => x.i === Player.index);
     const up = items.filter((x) => x.i > Player.index).slice(0, 200);
-    el.innerHTML = `${cur ? `<h4>در حال پخش</h4>${queueItem(cur.t, cur.i, true)}` : ''}
-      <h4>بعدی‌ها <small>${num(items.length - Player.index - 1)}</small></h4>${up.map((x) => queueItem(x.t, x.i)).join('') || '<p class="muted">صف خالیه.</p>'}`;
+    el.innerHTML = `${cur ? `<h4>Now playing</h4>${queueItem(cur.t, cur.i, true)}` : ''}
+      <h4>Up next <small>${num(Math.max(0, items.length - Player.index - 1))}</small></h4>${up.map((x) => queueItem(x.t, x.i)).join('') || '<p class="muted">The queue is empty.</p>'}`;
     hydrateCovers(el);
   }
   const queueItem = (t, i, cur) => `<div class="qitem ${cur ? 'cur' : ''}" data-qi="${i}" draggable="${!cur}">${coverHtml(t, 'xs')}<div><b>${esc(t.title)}</b><small>${esc(t.artist)}</small></div>${flagHtml(t.country, 'xs')}${cur ? '' : `<button class="icon-btn" data-qrm="${i}">${icon('close')}</button>`}</div>`;
@@ -1201,11 +1201,11 @@
     $$('#np [data-tab]').forEach((b) => b.classList.toggle('on', b.dataset.tab === name));
     $$('#np .np-pane').forEach((p) => p.hidden = p.id !== 'np-' + name);
     $('#np').classList.toggle('side-open', !!name);
-    if (name === 'eq') $('#np-eq').innerHTML = eqHtml() + `<div class="speed"><h4>سرعت پخش</h4><div class="seg">${[0.75, 1, 1.25, 1.5, 2].map((r) => `<button class="${(S.settings.rate || 1) === r ? 'on' : ''}" data-rate="${r}">${fa(r)}×</button>`).join('')}</div></div>`;
+    if (name === 'eq') $('#np-eq').innerHTML = eqHtml() + `<div class="speed"><h4>Playback speed</h4><div class="seg">${[0.75, 1, 1.25, 1.5, 2].map((r) => `<button class="${(S.settings.rate || 1) === r ? 'on' : ''}" data-rate="${r}">${r}×</button>`).join('')}</div></div>`;
     if (name === 'queue') renderQueue();
   }
 
-  /* ویژوالایزر */
+  /* Visualizer */
   let vizRaf;
   function startViz() {
     cancelAnimationFrame(vizRaf);
@@ -1238,20 +1238,20 @@
     draw();
   }
 
-  /* تایمر خواب */
+  /* Sleep timer */
   function sleepMenu(x, y) {
-    const opts = [[0, 'خاموش'], [5, '۵ دقیقه'], [15, '۱۵ دقیقه'], [30, '۳۰ دقیقه'], [45, '۴۵ دقیقه'], [60, '۱ ساعت'], ['end', 'پایان همین آهنگ']];
-    openMenu(x, y, opts.map(([m, l]) => ({ icon: 'moon', label: l, run: () => { Player.setSleep(m); toast(m ? `تایمر خواب: ${l}` : 'تایمر خواب خاموش شد'); } })));
+    const opts = [[0, 'Off'], [5, '5 minutes'], [15, '15 minutes'], [30, '30 minutes'], [45, '45 minutes'], [60, '1 hour'], ['end', 'End of this song']];
+    openMenu(x, y, opts.map(([m, l]) => ({ icon: 'moon', label: l, run: () => { Player.setSleep(m); toast(m ? `Sleep timer: ${l}` : 'Sleep timer off'); } })));
   }
   function updateSleep() {
     for (const b of $$('[data-act="sleep"]')) {
       b.classList.toggle('on', !!(Player.sleepAt || Player.sleepEndOfTrack));
-      b.title = Player.sleepAt ? `توقف در ${fa(Math.ceil((Player.sleepAt - Date.now()) / 60000))} دقیقه` : 'تایمر خواب';
+      b.title = Player.sleepAt ? `Stops in ${Math.ceil((Player.sleepAt - Date.now()) / 60000)} min` : 'Sleep timer';
     }
   }
 
   /* =========================================================
-   * رویدادها
+   * Events
    * ========================================================= */
   function bindEvents() {
     document.addEventListener('click', (e) => {
@@ -1266,7 +1266,7 @@
         switch (a) {
           case 'play-row': playKey(`${row.dataset.list}@${row.dataset.i}`); return;
           case 'like': toggleLike(act.dataset.likeId || (row && row.dataset.id)); return;
-          case 'menu': { const r = act.getBoundingClientRect(); trackMenu(row ? row.dataset.id : Player.current, r.left, r.bottom); return; }
+          case 'menu': { const r = act.getBoundingClientRect(); trackMenu(row ? row.dataset.id : Player.current, r.right, r.bottom); return; }
           case 'country': {
             const t = S.tracks.get(act.dataset.tid || (row ? row.dataset.id : Player.current));
             if (t) countryDialog(t);
@@ -1289,33 +1289,32 @@
           case 'open-np': openNP(); return;
           case 'close-np': closeNP(); return;
           case 'np-tab': npTab($('#np').classList.contains('side-open') && act.classList.contains('on') ? null : act.dataset.tab); return;
-          case 'sleep': { const r = act.getBoundingClientRect(); sleepMenu(r.left, r.top - 300); return; }
+          case 'sleep': { const r = act.getBoundingClientRect(); sleepMenu(r.right, r.top - 300); return; }
           case 'add-folder': addFolder(); return;
           case 'add-files': $('#file-input').click(); return;
-          case 'rescan': (async () => { for (const d of S.dirs) { d._scanned = false; } const ok = await ensureDirAccess(true); if (!ok) toast('دسترسی به پوشه داده نشد'); })(); return;
-          case 'redetect': for (const [k, v] of S.artists) if (!v.manual) S.artists.delete(k); detectCountries({ force: true }); toast('تشخیص دوباره شروع شد'); return;
-          case 'clear-lib': confirmDialog('همه‌ی آهنگ‌ها، کاورها و کپی‌های آفلاین از اپ پاک می‌شن (فایل‌های اصلی روی دستگاهت دست نمی‌خورن).', async () => {
+          case 'rescan': (async () => { for (const d of S.dirs) { d._scanned = false; } const ok = await ensureDirAccess(true); if (!ok) toast('Folder access was not granted'); })(); return;
+          case 'redetect': for (const [k, v] of S.artists) if (!v.manual) S.artists.delete(k); detectCountries({ force: true }); toast('Re-detection started'); return;
+          case 'clear-lib': confirmDialog('All songs, covers and offline copies will be removed from the app (your original files are not touched).', async () => {
             await Promise.all(['tracks', 'covers', 'files'].map((s) => DB.clear(s)));
             S.tracks.clear(); S.files.clear(); S.dirs = []; DB.set('kv', 'dirs', []);
             Player.pause(); Player.queue = []; Player.current = null; updateNowPlaying(); render();
           }); return;
-          case 'new-playlist': promptDialog('پلی‌لیست جدید', '', (name) => {
+          case 'new-playlist': promptDialog('New playlist', '', (name) => {
             if (!name) return;
             const p = { id: 'p' + Date.now().toString(36), name, ids: [], created: Date.now() };
             S.playlists.set(p.id, p); savePlaylists(); go('playlist/' + p.id);
           }); return;
-          case 'rename-pl': { const p = S.playlists.get(act.dataset.id); promptDialog('تغییر نام', p.name, (n) => { if (n) { p.name = n; savePlaylists(); render(); } }); return; }
-          case 'delete-pl': confirmDialog('این پلی‌لیست حذف بشه؟', () => { S.playlists.delete(act.dataset.id); savePlaylists(); go('playlists'); }); return;
+          case 'rename-pl': { const p = S.playlists.get(act.dataset.id); promptDialog('Rename playlist', p.name, (n) => { if (n) { p.name = n; savePlaylists(); render(); } }); return; }
+          case 'delete-pl': confirmDialog('Delete this playlist?', () => { S.playlists.delete(act.dataset.id); savePlaylists(); go('playlists'); }); return;
           case 'export-pl': exportM3U(S.playlists.get(act.dataset.id)); return;
           case 'export': exportBackup(); return;
           case 'import': $('#import-input').click(); return;
-          case 'clear-search': $('#search').value = ''; go('search'); return;
         }
       }
       const goEl = el.closest('[data-go]');
       if (goEl) { e.preventDefault(); if (goEl.closest('#np')) closeNP(); go(goEl.dataset.go); closeMenu(); return; }
 
-      // کلیک روی ردیف آهنگ = پخش
+      // Clicking a song row plays it
       const row = el.closest('.row');
       if (row && !el.closest('a,button')) { playKey(`${row.dataset.list}@${row.dataset.i}`); return; }
 
@@ -1343,7 +1342,7 @@
 
     document.addEventListener('contextmenu', (e) => {
       const row = e.target.closest('.row');
-      if (row) { e.preventDefault(); trackMenu(row.dataset.id, e.clientX, e.clientY); }
+      if (row) { e.preventDefault(); trackMenu(row.dataset.id, e.clientX + 230, e.clientY); }
     });
 
     document.addEventListener('input', (e) => {
@@ -1372,11 +1371,11 @@
     search.addEventListener('input', doSearch);
     search.addEventListener('focus', () => { if (!currentRoute.startsWith('search')) go('search/' + encodeURIComponent(search.value)); });
 
-    $('#dir-input').addEventListener('change', (e) => { const items = filesFromInput(e.target.files); e.target.value = ''; if (items.length) ingest(items); else toast('فایل صوتی پیدا نشد'); });
+    $('#dir-input').addEventListener('change', (e) => { const items = filesFromInput(e.target.files); e.target.value = ''; if (items.length) ingest(items); else toast('No audio files found'); });
     $('#file-input').addEventListener('change', (e) => { const items = filesFromInput(e.target.files); e.target.value = ''; if (items.length) ingest(items); });
     $('#import-input').addEventListener('change', async (e) => { const f = e.target.files[0]; e.target.value = ''; if (f) importBackup(await f.text()); });
 
-    // کشیدن و رها کردن فایل
+    // Drag & drop files
     let dragDepth = 0;
     window.addEventListener('dragenter', (e) => { if (e.dataTransfer.types.includes('Files')) { dragDepth++; document.body.classList.add('dropping'); } });
     window.addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth = 0; document.body.classList.remove('dropping'); } });
@@ -1385,16 +1384,16 @@
       if (!e.dataTransfer.types.includes('Files')) return;
       e.preventDefault(); dragDepth = 0; document.body.classList.remove('dropping');
       const items = await readDropped(e.dataTransfer);
-      if (items.length) ingest(items); else toast('فایل صوتی پیدا نشد');
+      if (items.length) ingest(items); else toast('No audio files found');
     });
 
-    // جابجایی در صف با کشیدن
+    // Reorder the queue by dragging
     let dragQ = null;
     document.addEventListener('dragstart', (e) => {
       const q = e.target.closest && e.target.closest('.qitem');
       if (q) { dragQ = +q.dataset.qi; e.dataTransfer.effectAllowed = 'move'; }
       const row = e.target.closest && e.target.closest('.row');
-      if (row) { e.dataTransfer.setData('text/ava-track', row.dataset.id); }
+      if (row) { e.dataTransfer.setData('text/music-track', row.dataset.id); }
     });
     document.addEventListener('dragover', (e) => { if (dragQ !== null && e.target.closest('.qitem')) e.preventDefault(); });
     document.addEventListener('drop', (e) => {
@@ -1403,7 +1402,7 @@
       dragQ = null;
     });
 
-    // صفحه‌کلید
+    // Keyboard
     document.addEventListener('keydown', (e) => {
       if (e.target.matches('input:not([type=range]),textarea,select')) { if (e.key === 'Escape') e.target.blur(); return; }
       const a = Player.audio;
@@ -1413,11 +1412,11 @@
         case 'ArrowLeft': e.preventDefault(); e.shiftKey ? Player.prev() : Player.seek(a.currentTime - 10); break;
         case 'ArrowUp': e.preventDefault(); Player.setVolume(a.volume + 0.05); break;
         case 'ArrowDown': e.preventDefault(); Player.setVolume(a.volume - 0.05); break;
-        case 'l': case 'L': case 'م': if (Player.current) toggleLike(Player.current); break;
-        case 's': case 'S': case 'س': Player.toggleShuffle(); toast(Player.shuffle ? 'پخش تصادفی روشن' : 'پخش تصادفی خاموش'); break;
-        case 'r': case 'R': case 'ق': Player.cycleRepeat(); break;
-        case 'm': case 'M': case 'پ': a.muted = !a.muted; break;
-        case 'f': case 'F': case 'ب': $('#np').classList.contains('open') ? closeNP() : openNP(); break;
+        case 'l': case 'L': if (Player.current) toggleLike(Player.current); break;
+        case 's': case 'S': Player.toggleShuffle(); toast(Player.shuffle ? 'Shuffle on' : 'Shuffle off'); break;
+        case 'r': case 'R': Player.cycleRepeat(); break;
+        case 'm': case 'M': a.muted = !a.muted; break;
+        case 'f': case 'F': $('#np').classList.contains('open') ? closeNP() : openNP(); break;
         case '/': e.preventDefault(); $('#search').focus(); break;
         case 'Escape': closeMenu(); closeDialog(); closeNP(); break;
       }
@@ -1426,7 +1425,7 @@
     window.addEventListener('hashchange', route);
     window.addEventListener('online', () => detectCountries());
 
-    // رویدادهای پخش‌کننده
+    // Player events
     Player.addEventListener('track', () => {
       playCounted = false; lastTime = 0;
       updateNowPlaying(); markPlaying(); saveSession();
@@ -1458,14 +1457,17 @@
     Player.addEventListener('queue', () => { renderQueue(); saveSession(); });
     Player.addEventListener('sleep', updateSleep);
     Player.addEventListener('missing', () => {
-      toast('به فایل این آهنگ دسترسی نیست', { label: S.dirs.length ? 'اجازه‌ی دسترسی' : 'انتخاب پوشه', run: () => S.dirs.length ? ensureDirAccess(true) : addFolder() });
+      toast("Can't access this song's file", { label: S.dirs.length ? 'Allow access' : 'Choose folder', run: () => S.dirs.length ? ensureDirAccess(true) : addFolder() });
     });
-    Player.addEventListener('playerror', () => toast('مرورگر نمی‌تونه این فرمت رو پخش کنه؛ آهنگ بعدی…') || setTimeout(() => Player.next(true), 800));
+    Player.addEventListener('playerror', () => {
+      toast("Your browser can't play this format — skipping…");
+      setTimeout(() => Player.next(true), 800);
+    });
     setInterval(updateSleep, 30000);
   }
 
   /* =========================================================
-   * پشتیبان، خروجی، جلسه
+   * Backup, export, session
    * ========================================================= */
   function download(name, text, type = 'application/json') {
     const a = document.createElement('a');
@@ -1485,12 +1487,12 @@
     }
     const pl = Array.from(S.playlists.values()).map((p) => ({ ...p, paths: p.ids.map((id) => S.tracks.get(id) && S.tracks.get(id).path).filter(Boolean) }));
     const manual = Array.from(S.artists.entries()).filter(([, v]) => v.manual);
-    download(`ava-backup-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify({ app: 'ava', v: 1, tracks, playlists: pl, artists: manual, settings: S.settings, listen: S.listenSeconds }, null, 1));
+    download(`music-backup-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify({ app: 'music', v: 1, tracks, playlists: pl, artists: manual, settings: S.settings, listen: S.listenSeconds }, null, 1));
   }
   function importBackup(text) {
     try {
       const d = JSON.parse(text);
-      if (d.app !== 'ava') throw new Error();
+      if (d.app !== 'music') throw new Error();
       const byPath = new Map(all().map((t) => [t.path, t]));
       for (const [p, v] of Object.entries(d.tracks || {})) { const t = byPath.get(p); if (t) { Object.assign(t, v); resolveCountry(t); queueSave(t); } }
       for (const p of d.playlists || []) { p.ids = (p.paths || []).map((x) => byPath.get(x)).filter(Boolean).map((t) => t.id); delete p.paths; S.playlists.set(p.id, p); }
@@ -1498,15 +1500,15 @@
       if (d.settings) Object.assign(S.settings, d.settings);
       S.listenSeconds = Math.max(S.listenSeconds, d.listen || 0);
       savePlaylists(); saveArtists(); saveSettings(); applyTheme(); recomputeAll(); render();
-      toast('بازیابی انجام شد ✅');
-    } catch (e) { toast('فایل پشتیبان معتبر نیست'); }
+      toast('Backup restored ✅');
+    } catch (e) { toast('That backup file is not valid'); }
   }
   const saveSession = debounce(() => {
     DB.set('kv', 'session', { queue: Player.queue, index: Player.index, time: Player.audio.currentTime || 0, shuffle: Player.shuffle, repeat: Player.repeat });
   }, 500);
 
   /* =========================================================
-   * تم
+   * Theme
    * ========================================================= */
   function applyTheme() {
     const r = document.documentElement;
@@ -1518,7 +1520,7 @@
   }
 
   /* =========================================================
-   * راه‌اندازی
+   * Startup
    * ========================================================= */
   async function init() {
     Player.resolveUrl = resolveUrl;
@@ -1528,6 +1530,7 @@
     ]);
     for (const [id, t] of tracks) S.tracks.set(id, t);
     if (settings) Object.assign(S.settings, settings);
+    if (!Player.EQ_PRESETS[S.settings.eqPreset]) S.settings.eqPreset = '';
     for (const [k, v] of artists || []) S.artists.set(k, v);
     for (const p of playlists || []) S.playlists.set(p.id, p);
     S.history = history || [];
@@ -1560,7 +1563,7 @@
 
     render();
 
-    // دسترسی به پوشه‌های ذخیره‌شده
+    // Re-connect saved folders
     if (S.dirs.length) {
       const ok = await ensureDirAccess(false);
       if (!ok) {

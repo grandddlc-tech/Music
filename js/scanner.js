@@ -1,11 +1,11 @@
-/* خواندن فایل‌های موسیقی، تگ‌ها و کاور */
+/* Reading music files, tags and cover art */
 (function () {
   const AUDIO_EXT = /\.(mp3|m4a|aac|flac|ogg|oga|opus|wav|webm|mp4|alac|aiff?|wma)$/i;
   const S = {};
   window.Scanner = S;
   S.isAudio = (name) => AUDIO_EXT.test(name);
 
-  /* شناسه‌ی پایدار برای هر فایل */
+  /* Stable id for each file */
   S.fileId = (path, size) => {
     let h = 2166136261;
     const s = `${path}|${size}`;
@@ -13,7 +13,7 @@
     return 't' + (h >>> 0).toString(36) + size.toString(36);
   };
 
-  /* پیمایش پوشه با File System Access API */
+  /* Walk a folder with the File System Access API */
   S.walkHandle = async function* (dir, prefix = '') {
     for await (const entry of dir.values()) {
       if (entry.kind === 'file' && S.isAudio(entry.name)) {
@@ -42,7 +42,7 @@
     return String(v).replace(/\u0000/g, '').trim();
   }
 
-  /* اگر تگ نداشت از اسم فایل حدس بزن: «خواننده - عنوان» */
+  /* No tags? Guess from the file name: "Artist - Title" */
   function fromFilename(path) {
     const base = path.split('/').pop().replace(/\.[^.]+$/, '')
       .replace(/[_]+/g, ' ')
@@ -67,14 +67,14 @@
       cv.width = w; cv.height = h;
       const ctx = cv.getContext('2d');
       ctx.drawImage(bmp, 0, 0, w, h);
-      // میانگین رنگ برای تم داینامیک
+      // average colour for the dynamic theme
       const px = ctx.getImageData(0, 0, w, h).data;
       let r = 0, g = 0, b = 0, n = 0;
       for (let i = 0; i < px.length; i += 4 * 37) {
         const R = px[i], G = px[i + 1], B = px[i + 2];
         const mx = Math.max(R, G, B), mn = Math.min(R, G, B);
         const sat = mx - mn;
-        const wgt = 1 + sat / 32; // رنگ‌های اشباع‌تر وزن بیشتری دارند
+        const wgt = 1 + sat / 32; // saturated colours weigh more
         r += R * wgt; g += G * wgt; b += B * wgt; n += wgt;
       }
       const color = n ? [Math.round(r / n), Math.round(g / n), Math.round(b / n)] : null;
@@ -86,13 +86,13 @@
     }
   }
 
-  /* استخراج کامل اطلاعات یک فایل */
+  /* Extract all metadata from a file */
   S.parse = async (file, path) => {
     const tags = await readTags(file);
     const fn = fromFilename(path);
     const track = {
       title: cleanStr(tags.title) || fn.title,
-      artist: cleanStr(tags.artist) || fn.artist || 'خواننده‌ی ناشناس',
+      artist: cleanStr(tags.artist) || fn.artist || 'Unknown Artist',
       album: cleanStr(tags.album) || '',
       albumArtist: cleanStr(tags.TPE2 && tags.TPE2.data) || '',
       genre: cleanStr(tags.genre).replace(/^\((\d+)\)/, ''),
@@ -111,7 +111,7 @@
     return { track, cover };
   };
 
-  /* مدت زمان آهنگ */
+  /* Track duration */
   S.duration = (file) => new Promise((resolve) => {
     const a = document.createElement('audio');
     const url = URL.createObjectURL(file);

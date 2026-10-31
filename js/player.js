@@ -1,4 +1,4 @@
-/* پخش‌کننده: صف، شافل، تکرار، اکولایزر، ویژوالایزر، تایمر خواب */
+/* Player: queue, shuffle, repeat, equalizer, visualizer, sleep timer */
 (function () {
   const P = new EventTarget();
   window.Player = P;
@@ -7,28 +7,28 @@
   audio.preload = 'auto';
   P.audio = audio;
 
-  P.queue = [];      // آرایه‌ی شناسه‌ها به ترتیب پخش
-  P.original = [];   // ترتیب اصلی (برای خاموش کردن شافل)
+  P.queue = [];      // track ids in play order
+  P.original = [];   // original order (to restore when shuffle is turned off)
   P.index = -1;
   P.shuffle = false;
   P.repeat = 'off';  // off | all | one
   P.current = null;
-  P.resolveUrl = null;   // تابعی که App ست می‌کند: id → Promise<url>
+  P.resolveUrl = null;   // set by the app: id → Promise<url>
   let currentUrl = null;
 
   /* ---------- Web Audio ---------- */
   P.EQ_BANDS = [60, 170, 310, 600, 1000, 3000, 6000, 12000, 14000, 16000];
   P.EQ_PRESETS = {
-    'صاف': [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    'باس قوی': [7, 6, 4, 2, 0, 0, 0, 0, 0, 0],
-    'پاپ': [-1, 2, 4, 5, 3, 0, -1, -1, 0, 0],
-    'راک': [5, 3, -1, -3, -1, 2, 4, 5, 5, 5],
-    'وکال': [-2, -2, 0, 3, 5, 5, 3, 1, 0, -1],
-    'سنتی': [2, 1, 0, 2, 3, 3, 2, 3, 2, 1],
-    'الکترونیک': [6, 5, 1, 0, -2, 2, 1, 2, 5, 6],
-    'جز': [3, 2, 1, 2, -1, -1, 0, 1, 2, 3],
-    'کلاسیک': [4, 3, 2, 1, -1, -1, 0, 2, 3, 4],
-    'هیپ‌هاپ': [6, 5, 1, 3, -1, -1, 1, -1, 2, 3],
+    'Flat': [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    'Bass Boost': [7, 6, 4, 2, 0, 0, 0, 0, 0, 0],
+    'Pop': [-1, 2, 4, 5, 3, 0, -1, -1, 0, 0],
+    'Rock': [5, 3, -1, -3, -1, 2, 4, 5, 5, 5],
+    'Vocal': [-2, -2, 0, 3, 5, 5, 3, 1, 0, -1],
+    'Traditional': [2, 1, 0, 2, 3, 3, 2, 3, 2, 1],
+    'Electronic': [6, 5, 1, 0, -2, 2, 1, 2, 5, 6],
+    'Jazz': [3, 2, 1, 2, -1, -1, 0, 1, 2, 3],
+    'Classical': [4, 3, 2, 1, -1, -1, 0, 2, 3, 4],
+    'Hip-Hop': [6, 5, 1, 3, -1, -1, 1, -1, 2, 3],
   };
   let ctx, filters = [], analyser, gainNode;
   P.eqGains = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
@@ -59,7 +59,7 @@
   };
   P.analyser = () => analyser;
 
-  /* ---------- پخش ---------- */
+  /* ---------- Playback ---------- */
   async function loadIndex(i, autoplay = true) {
     if (i < 0 || i >= P.queue.length) return;
     P.index = i;
@@ -67,7 +67,7 @@
     P.current = id;
     let url;
     try { url = await P.resolveUrl(id); } catch (e) { url = null; }
-    if (P.current !== id) return; // در این فاصله آهنگ دیگری انتخاب شده
+    if (P.current !== id) return; // another track was picked meanwhile
     if (!url) {
       P.dispatchEvent(new CustomEvent('missing', { detail: id }));
       return;
@@ -97,7 +97,7 @@
   };
   P.play = async () => {
     ensureGraph();
-    try { await audio.play(); } catch (e) { /* نیاز به تعامل کاربر */ }
+    try { await audio.play(); } catch (e) { /* needs a user gesture */ }
   };
   P.pause = () => audio.pause();
   P.toggle = () => {
@@ -168,7 +168,7 @@
     P.dispatchEvent(new Event('queue'));
   };
 
-  /* ---------- تایمر خواب ---------- */
+  /* ---------- Sleep timer ---------- */
   let sleepTimer = null;
   P.sleepAt = 0;
   P.sleepEndOfTrack = false;
@@ -209,7 +209,7 @@
     return a;
   }
 
-  /* ---------- Media Session (کنترل از صفحه‌ی قفل و هدفون) ---------- */
+  /* ---------- Media Session (lock screen & headphone controls) ---------- */
   P.setMediaSession = (t, artworkUrl) => {
     if (!('mediaSession' in navigator) || !t) return;
     navigator.mediaSession.metadata = new MediaMetadata({
