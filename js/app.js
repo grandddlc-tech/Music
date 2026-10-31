@@ -1881,6 +1881,35 @@
     detectCountries();
   }
 
+  /* Opening animation: logo rises, then "Music 🎵" types out underneath */
+  (function runIntro() {
+    const el = document.getElementById('intro');
+    if (!el) return;
+    const word = el.querySelector('.intro-word');
+    const note = el.querySelector('.intro-note');
+    let finished = false;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      el.classList.add('done');
+      setTimeout(() => el.remove(), 600);
+    };
+    el.addEventListener('click', finish); // tap to skip
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      el.classList.add('up'); word.textContent = 'Music'; note.hidden = false;
+      setTimeout(finish, 700);
+      return;
+    }
+    setTimeout(() => el.classList.add('up'), 500);
+    const text = 'Music';
+    let i = 0;
+    setTimeout(function type() {
+      word.textContent = text.slice(0, ++i);
+      if (i < text.length) setTimeout(type, 115);
+      else setTimeout(() => { note.hidden = false; setTimeout(finish, 950); }, 180);
+    }, 950);
+  })();
+
   if ('serviceWorker' in navigator && location.protocol.startsWith('http') && !NATIVE) {
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }

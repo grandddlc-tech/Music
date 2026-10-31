@@ -711,3 +711,38 @@ body.dropping .drop-hint {
 
 /* Android app: no folder picking needed */
 body.native .add-btn, body.native .top-add { display: none !important; }
+
+/* ===== Opening animation ===== */
+#intro {
+  position: fixed; inset: 0; z-index: 200; background: #0b0b12; display: grid; place-items: center;
+  transition: opacity .5s ease, visibility .5s ease; cursor: pointer;
+}
+#intro.done { opacity: 0; visibility: hidden; }
+.intro-glow {
+  position: absolute; width: 520px; height: 520px; border-radius: 50%;
+  background: radial-gradient(circle, rgba(139, 92, 246, .35), rgba(236, 72, 153, .12) 45%, transparent 70%);
+  animation: introGlow 2.4s ease-in-out infinite alternate; pointer-events: none;
+}
+@keyframes introGlow { from { transform: scale(.85); opacity: .7; } to { transform: scale(1.1); opacity: 1; } }
+.intro-stack {
+  position: relative; display: flex; flex-direction: column; align-items: center; gap: 24px;
+  transform: translateY(42px); transition: transform .8s cubic-bezier(.2, .8, .2, 1);
+}
+#intro.up .intro-stack { transform: translateY(-6px); }
+.intro-logo {
+  width: 116px; height: 116px; filter: drop-shadow(0 22px 44px rgba(236, 72, 153, .4));
+  animation: introPop .7s cubic-bezier(.2, .9, .3, 1.3) both;
+}
+@keyframes introPop { from { transform: scale(.55); opacity: 0; } }
+.intro-wave { stroke-dasharray: 700; stroke-dashoffset: 700; animation: introDraw 1s .25s ease forwards; }
+@keyframes introDraw { to { stroke-dashoffset: 0; } }
+.intro-text {
+  display: flex; align-items: center; height: 56px; font-family: var(--font); font-size: 44px; font-weight: 800;
+  letter-spacing: -.02em; color: #fff; opacity: 0; transition: opacity .3s;
+}
+#intro.up .intro-text { opacity: 1; }
+.intro-word { background: linear-gradient(135deg, #fff 30%, #c4b5fd); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.intro-note { display: inline-block; margin-left: 10px; font-size: 38px; animation: introNote .6s cubic-bezier(.2, .9, .3, 1.6) both; }
+@keyframes introNote { from { transform: translateY(14px) scale(.3) rotate(-25deg); opacity: 0; } }
+.intro-caret { width: 3px; height: 40px; margin-left: 6px; border-radius: 2px; background: #a78bfa; animation: introBlink .9s steps(1) infinite; }
+@keyframes introBlink { 50% { opacity: 0; } }
