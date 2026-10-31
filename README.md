@@ -3,6 +3,16 @@
 A beautiful personal music player that reads your whole music library and **works out which country every song is from — automatically**.
 Everything runs on your own device; your songs are never uploaded.
 
+## Android app
+
+**Download:** https://github.com/grandddlc-tech/Music/releases/latest/download/Music.apk
+
+Open the file on your phone and install it (Android will ask you to allow installing from your browser / file manager — that's normal for apps outside the Play Store). Then open **Music** and tap **Allow access to my music**.
+
+The Android app reads **every song on the phone** — the same library other music players see — and adds new downloads automatically, even ones downloaded while the app was closed. Music keeps playing with the screen off, with previous / play-pause / next buttons in the notification.
+
+Every push to the repository builds a new APK (GitHub Actions → *Build Android app*) and publishes it on the Releases page; installing it updates the app and keeps your likes and playlists.
+
 ## Running it
 
 It's a static web app — no install or build step:
