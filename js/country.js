@@ -25,11 +25,17 @@
     try { return (enNames && enNames.of(code)) || code; } catch (e) { return code; }
   };
   C.emoji = (code) => {
+    if (code === 'IR') return '🦁☀️';
     if (!code || SPECIAL[code]) return (SPECIAL[code] || SPECIAL.ZZ).emoji;
     return String.fromCodePoint(...code.toUpperCase().split('').map((c) => 127397 + c.charCodeAt(0)));
   };
-  C.flagUrl = (code) => (code && /^[A-Z]{2}$/.test(code) && !['XA', 'ZZ'].includes(code))
-    ? `https://flagcdn.com/w160/${code.toLowerCase()}.png` : null;
+  // Custom flags bundled with the app (shown instead of the standard ones)
+  const LOCAL_FLAGS = { IR: 'icons/flags/ir.jpg' }; // Lion and Sun flag
+  C.flagUrl = (code) => {
+    if (LOCAL_FLAGS[code]) return LOCAL_FLAGS[code];
+    return (code && /^[A-Z]{2}$/.test(code) && !['XA', 'ZZ'].includes(code))
+      ? `https://flagcdn.com/w160/${code.toLowerCase()}.png` : null;
+  };
 
   /* English country name → code (for MusicBrainz answers) */
   const EN2CODE = {};
