@@ -48,8 +48,8 @@
     history: [],            // recently played ids
     dirs: [],               // FileSystemDirectoryHandle[]
     settings: {
-      online: true, keepCopies: !window.showDirectoryPicker, accent: '#8b5cf6', dynamic: true,
-      autoScan: true, theme: 'dark', volume: 1, rate: 1, eq: Array(10).fill(0), eqPreset: 'Flat', visualizer: true,
+      online: true, keepCopies: !window.showDirectoryPicker, accent: '#fa2d48', dynamic: true,
+      autoScan: true, theme: 'auto', volume: 1, rate: 1, eq: Array(10).fill(0), eqPreset: 'Flat', visualizer: true,
     },
     listenSeconds: 0,
     lists: {},              // rendered lists, so rows can be played in context
@@ -679,7 +679,7 @@
       <div class="card-title">${esc(title)}</div>${sub ? `<div class="card-sub">${sub}</div>` : ''}
     </div>`;
   }
-  const shelf = (title, inner, more) => `<section class="shelf"><div class="shelf-head"><h2>${title}</h2>${more ? `<a class="see-all" data-go="${more}">Show all ${icon('chev-right')}</a>` : ''}</div><div class="scroller">${inner}</div></section>`;
+  const shelf = (title, inner, more) => `<section class="shelf"><div class="shelf-head"><h2>${title}</h2>${more ? `<a class="see-all" data-go="${more}">See All</a>` : ''}</div><div class="scroller">${inner}</div></section>`;
 
   function countryCard(c, big = false) {
     const key = registerList('country-' + c.code, c.tracks);
@@ -757,12 +757,12 @@
     </section>`;
 
     const quick = [
-      { t: 'Liked Songs', s: songs(liked.length), go: 'playlist/liked', g: 'linear-gradient(135deg,#ec4899,#8b5cf6)', i: 'heart-fill' },
-      { t: 'Recently Added', s: `${songs(byAdded().filter((x) => Date.now() - x.addedAt < 30 * 864e5).length)} this month`, go: 'new', g: 'linear-gradient(135deg,#06b6d4,#3b82f6)', i: 'sparkle' },
-      { t: 'Most Played', s: songs(top.length), go: 'playlist/top', g: 'linear-gradient(135deg,#f59e0b,#ef4444)', i: 'fire' },
-      { t: 'Rediscover', s: `${songs(never.length)} never played`, go: 'playlist/never', g: 'linear-gradient(135deg,#10b981,#06b6d4)', i: 'compass' },
+      { t: 'Liked Songs', s: num(liked.length), go: 'playlist/liked', g: '#ff2d55', i: 'heart-fill' },
+      { t: 'Recently Added', s: num(byAdded().filter((x) => Date.now() - x.addedAt < 30 * 864e5).length), go: 'new', g: '#007aff', i: 'sparkle' },
+      { t: 'Most Played', s: num(top.length), go: 'playlist/top', g: '#ff9500', i: 'fire' },
+      { t: 'Rediscover', s: num(never.length), go: 'playlist/never', g: '#34c759', i: 'compass' },
     ];
-    html += `<section class="quick">${quick.map((q) => `<div class="qtile" data-go="${q.go}"><div class="qicon" style="background:${q.g}">${icon(q.i)}</div><div><b>${q.t}</b><small>${q.s}</small></div></div>`).join('')}</section>`;
+    html += `<section class="quick">${quick.map((q) => `<div class="qtile" data-go="${q.go}"><div class="qicon" style="background:${q.g}">${icon(q.i)}</div><b>${q.t}</b><small>${q.s}</small>${icon('chev-right')}</div>`).join('')}</section>`;
 
     html += shelf(`${icon('sparkle')} Recently added`, recent.map((t, i) => card({
       cover: coverHtml(t), title: t.title, sub: `${esc(t.artist)} • ${relDate(t.addedAt)}`, play: `new@${i}`, badge: Date.now() - t.addedAt < 3 * 864e5 ? '<span class="badge-new">NEW</span>' : '',
@@ -785,7 +785,7 @@
     }
     if (top.length) {
       registerList('top', top);
-      html += `<section class="shelf"><div class="shelf-head"><h2>${icon('fire')} Your top songs</h2><a class="see-all" data-go="playlist/top">Show all ${icon('chev-right')}</a></div>${trackRows(top.slice(0, 6), 'top-mini', { showAlbum: false })}</section>`;
+      html += `<section class="shelf"><div class="shelf-head"><h2>${icon('fire')} Your top songs</h2><a class="see-all" data-go="playlist/top">See All</a></div>${trackRows(top.slice(0, 6), 'top-mini', { showAlbum: false })}</section>`;
     }
     html += shelf(`${icon('mic')} Artists`, arts.map((a) => card({
       cover: coverHtml(a.tracks.find((t) => t.coverId) || a.tracks[0], 'round-cover', a.name), title: a.name,
@@ -1027,7 +1027,8 @@
 
   views.settings = () => {
     const st = S.settings;
-    const accents = ['#8b5cf6', '#ec4899', '#ef4444', '#f59e0b', '#10b981', '#06b6d4', '#3b82f6', '#a3e635'];
+    // iOS system colors (Apple Music pink first)
+    const accents = ['#fa2d48', '#ff3b30', '#ff9500', '#ffcc00', '#34c759', '#30b0c7', '#007aff', '#5856d6', '#af52de'];
     const known = Array.from(S.artists.values());
     const srcStats = {};
     for (const t of S.tracks.values()) srcStats[t.countrySource] = (srcStats[t.countrySource] || 0) + 1;
@@ -1058,7 +1059,7 @@
         <section class="set-card"><h3>${icon('palette')} Appearance</h3>
           <div class="swatches">${accents.map((c) => `<button class="swatch ${st.accent === c ? 'on' : ''}" style="background:${c}" data-accent="${c}"></button>`).join('')}<input type="color" value="${st.accent}" id="accent-pick"></div>
           <div class="seg">${[['dark', 'Dark'], ['light', 'Light'], ['auto', 'Auto']].map(([k, l]) => `<button class="${st.theme === k ? 'on' : ''}" data-theme="${k}">${l}</button>`).join('')}</div>
-          <label class="switch"><input type="checkbox" data-set="dynamic" ${st.dynamic ? 'checked' : ''}><span></span><div><b>Dynamic colours from cover art</b><small>The background follows the cover of the song that's playing.</small></div></label>
+          <label class="switch"><input type="checkbox" data-set="dynamic" ${st.dynamic ? 'checked' : ''}><span></span><div><b>Colours from cover art</b><small>The Now Playing screen takes its colours from the song's cover.</small></div></label>
           <label class="switch"><input type="checkbox" data-set="visualizer" ${st.visualizer ? 'checked' : ''}><span></span><div><b>Visualizer</b><small>Show audio bars on the Now Playing screen.</small></div></label>
         </section>
         <section class="set-card"><h3>${icon('sliders')} Equalizer</h3>${eqHtml()}</section>
@@ -1684,6 +1685,24 @@
       }
     });
 
+    let swipeY = null;
+    $('#np').addEventListener('touchstart', (e) => {
+      swipeY = e.target.closest('input, .np-side, .np-tools') ? null : e.touches[0].clientY;
+    }, { passive: true });
+    $('#np').addEventListener('touchmove', (e) => {
+      if (swipeY === null) return;
+      const dy = e.touches[0].clientY - swipeY;
+      $('#np').style.transform = dy > 0 ? `translateY(${dy}px)` : '';
+      $('#np').style.transition = 'none';
+    }, { passive: true });
+    $('#np').addEventListener('touchend', (e) => {
+      if (swipeY === null) return;
+      const dy = e.changedTouches[0].clientY - swipeY;
+      swipeY = null;
+      $('#np').style.transition = ''; $('#np').style.transform = '';
+      if (dy > 110) closeNP();
+    });
+
     window.addEventListener('hashchange', route);
     window.addEventListener('popstate', () => { if ($('#np').classList.contains('open') && !(history.state && history.state.np)) closeNP(true); });
     window.addEventListener('online', () => detectCountries());
@@ -1779,7 +1798,7 @@
     const theme = S.settings.theme === 'auto' ? (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark') : S.settings.theme;
     r.dataset.theme = theme;
     const m = $('meta[name="theme-color"]');
-    if (m) m.content = theme === 'light' ? '#f5f3ff' : '#0b0b12';
+    if (m) m.content = theme === 'light' ? '#ffffff' : '#000000';
   }
 
   /* =========================================================
@@ -1802,6 +1821,13 @@
 
     applyTheme();
     matchMedia('(prefers-color-scheme: light)').addEventListener('change', applyTheme);
+    // Switch existing installs to the iOS look once (iOS pink accent, follows the phone's light/dark mode)
+    if (!S.settings.iosStyle) {
+      S.settings.iosStyle = true;
+      S.settings.accent = '#fa2d48';
+      S.settings.theme = 'auto';
+      saveSettings();
+    }
     // Phones: play at full volume (the phone's volume buttons control loudness), plain audio path
     if (!S.settings.soundV2) {
       S.settings.soundV2 = true;
@@ -1880,35 +1906,6 @@
     computeDurations();
     detectCountries();
   }
-
-  /* Opening animation: logo rises, then "Music 🎵" types out underneath */
-  (function runIntro() {
-    const el = document.getElementById('intro');
-    if (!el) return;
-    const word = el.querySelector('.intro-word');
-    const note = el.querySelector('.intro-note');
-    let finished = false;
-    const finish = () => {
-      if (finished) return;
-      finished = true;
-      el.classList.add('done');
-      setTimeout(() => el.remove(), 600);
-    };
-    el.addEventListener('click', finish); // tap to skip
-    if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      el.classList.add('up'); word.textContent = 'Music'; note.hidden = false;
-      setTimeout(finish, 700);
-      return;
-    }
-    setTimeout(() => el.classList.add('up'), 500);
-    const text = 'Music';
-    let i = 0;
-    setTimeout(function type() {
-      word.textContent = text.slice(0, ++i);
-      if (i < text.length) setTimeout(type, 115);
-      else setTimeout(() => { note.hidden = false; setTimeout(finish, 950); }, 180);
-    }, 950);
-  })();
 
   if ('serviceWorker' in navigator && location.protocol.startsWith('http') && !NATIVE) {
     navigator.serviceWorker.register('sw.js').catch(() => {});

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Music</title>
   <meta name="description" content="Your personal music player that detects the country of every song">
-  <meta name="theme-color" content="#0b0b12">
+  <meta name="theme-color" content="#000000">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
@@ -13,7 +13,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -70,15 +70,6 @@
       <symbol id="i-vol-mute" viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4zM22 9l-6 6M16 9l6 6"/></symbol>
     </defs>
   </svg>
-
-  <!-- Opening animation: logo rises, "Music 🎵" types out underneath -->
-  <div id="intro" aria-hidden="true">
-    <div class="intro-glow"></div>
-    <div class="intro-stack">
-      <svg class="intro-logo" viewBox="0 0 512 512"><defs><linearGradient id="ig" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#8b5cf6"/><stop offset="1" stop-color="#ec4899"/></linearGradient></defs><rect width="512" height="512" rx="112" fill="url(#ig)"/><path class="intro-wave" d="M146 320c32-96 54-150 66-150s22 172 44 172 32-130 54-130 22 76 54 76" stroke="#fff" stroke-width="36" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      <div class="intro-text"><span class="intro-word"></span><span class="intro-note" hidden>🎵</span><i class="intro-caret"></i></div>
-    </div>
-  </div>
 
   <div class="bg-glow" aria-hidden="true"></div>
 
@@ -165,7 +156,8 @@
   <section id="np" class="np" aria-label="Now Playing">
     <div class="np-bg"></div>
     <div class="np-top">
-      <button class="icon-btn" data-act="close-np" title="Close"><svg class="ic"><use href="#i-chev-down"/></svg></button>
+      <button class="np-grabber" data-act="close-np" aria-label="Close"></button>
+      <button class="icon-btn np-close" data-act="close-np" title="Close"><svg class="ic"><use href="#i-chev-down"/></svg></button>
       <div class="np-label">Now Playing<small class="np-album"></small></div>
       <button class="icon-btn" data-act="menu" title="More"><svg class="ic"><use href="#i-more"/></svg></button>
     </div>
