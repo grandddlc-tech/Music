@@ -2,12 +2,15 @@ package com.grandddlc.music;
 
 import android.Manifest;
 import android.content.ContentResolver;
+import android.content.ContentUris;
+import android.content.ContentValues;
 import android.content.Intent;
 import android.database.ContentObserver;
 import android.database.Cursor;
 import android.graphics.BitmapFactory;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.MediaStore;
@@ -159,6 +162,40 @@ public class MediaLibraryPlugin extends Plugin {
                 MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, true, observer);
         }
         call.resolve();
+    }
+
+    /** Writes the backup to Downloads/Music-backup.json (it stays there even if the app is uninstalled). */
+    @PluginMethod
+    public void saveBackup(PluginCall call) {
+        final String data = call.getString("data", "");
+        if (Build.VERSION.SDK_INT < 29) {
+            call.reject("UNSUPPORTED");
+            return;
+        }
+        getBridge().execute(() -> {
+            try {
+                ContentResolver cr = getContext().getContentResolver();
+                Uri col = MediaStore.Downloads.EXTERNAL_CONTENT_URI;
+                Uri target = null;
+                try (Cursor c = cr.query(col, new String[] { MediaStore.MediaColumns._ID },
+                        MediaStore.MediaColumns.DISPLAY_NAME + " = ?", new String[] { "Music-backup.json" }, null)) {
+                    if (c != null && c.moveToFirst()) target = ContentUris.withAppendedId(col, c.getLong(0));
+                }
+                if (target == null) {
+                    ContentValues v = new ContentValues();
+                    v.put(MediaStore.MediaColumns.DISPLAY_NAME, "Music-backup.json");
+                    v.put(MediaStore.MediaColumns.MIME_TYPE, "application/json");
+                    v.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS);
+                    target = cr.insert(col, v);
+                }
+                try (java.io.OutputStream os = cr.openOutputStream(target, "wt")) {
+                    os.write(data.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                }
+                call.resolve();
+            } catch (Exception e) {
+                call.reject("BACKUP_FAILED: " + e.getMessage());
+            }
+        });
     }
 
     /** Shows / updates / hides the media notification (keeps music playing in the background). */

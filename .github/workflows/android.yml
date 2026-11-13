@@ -4,12 +4,25 @@ on:
   push:
     branches: [main, ccr-c79c0740-c858hv]
   workflow_dispatch:
+  # Every 3 days: touch the cached signing key so GitHub never deletes it for being unused
+  schedule:
+    - cron: '17 3 */3 * *'
 
 permissions:
   contents: write
 
 jobs:
+  keep-signing-key:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/cache/restore@v4
+        with:
+          path: ~/.music-signing
+          key: music-signing-key-v1
+
   apk:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

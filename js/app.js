@@ -196,14 +196,15 @@
 
   const saveSettings = debounce(() => DB.set('kv', 'settings', S.settings), 300);
   const saveArtists = debounce(() => DB.set('kv', 'artists', Array.from(S.artists.entries())), 800);
-  const savePlaylists = () => DB.set('kv', 'playlists', Array.from(S.playlists.values()));
+  let autoBackup = () => {};
+  const savePlaylists = () => { autoBackup(); return DB.set('kv', 'playlists', Array.from(S.playlists.values())); };
   const pendingTrackSaves = new Set();
   const flushTracks = debounce(() => {
     const entries = Array.from(pendingTrackSaves).map((id) => [id, S.tracks.get(id)]).filter((e) => e[1]);
     pendingTrackSaves.clear();
     if (entries.length) DB.putMany('tracks', entries);
   }, 600);
-  const queueSave = (t) => { pendingTrackSaves.add(t.id); flushTracks(); };
+  const queueSave = (t) => { pendingTrackSaves.add(t.id); flushTracks(); autoBackup(); };
 
   /* =========================================================
    * Country
@@ -1075,7 +1076,7 @@
         </section>
         <section class="set-card"><h3>${icon('sliders')} Equalizer</h3>${eqHtml()}</section>
         <section class="set-card"><h3>${icon('download')} Backup</h3>
-          <p class="muted">Save or restore your likes, playlists, play counts and country choices.</p>
+          <p class="muted">${NATIVE ? 'Your likes, playlists, play counts and country choices are saved automatically to <b>Downloads/Music-backup.json</b>. If you ever reinstall the app, tap Restore and pick that file.' : 'Save or restore your likes, playlists, play counts and country choices.'}</p>
           <div class="btn-row"><button class="btn ghost" data-act="export">${icon('download')} Export</button><button class="btn ghost" data-act="import">${icon('upload')} Restore</button></div>
         </section>
         <section class="set-card"><h3>${icon('keyboard')} Keyboard shortcuts</h3>
@@ -1784,15 +1785,32 @@
     for (const id of p.ids) { const t = S.tracks.get(id); if (t) lines.push(`#EXTINF:${Math.round(t.duration || -1)},${t.artist} - ${t.title}`, t.path); }
     download(`${p.name}.m3u`, lines.join('\n'), 'audio/x-mpegurl');
   }
-  function exportBackup() {
+  function backupJson() {
     const tracks = {};
     for (const t of S.tracks.values()) {
       if (t.liked || t.plays || t.manualCountry) tracks[t.path] = { liked: t.liked, likedAt: t.likedAt, plays: t.plays, lastPlayed: t.lastPlayed, manualCountry: t.manualCountry };
     }
     const pl = Array.from(S.playlists.values()).map((p) => ({ ...p, paths: p.ids.map((id) => S.tracks.get(id) && S.tracks.get(id).path).filter(Boolean) }));
     const manual = Array.from(S.artists.entries()).filter(([, v]) => v.manual);
-    download(`music-backup-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify({ app: 'music', v: 1, tracks, playlists: pl, artists: manual, settings: S.settings, listen: S.listenSeconds }, null, 1));
+    const worth = Object.keys(tracks).length + pl.length + manual.length > 0;
+    return { worth, json: JSON.stringify({ app: 'music', v: 1, tracks, playlists: pl, artists: manual, settings: S.settings, listen: S.listenSeconds }, null, 1) };
   }
+  async function exportBackup() {
+    const { json } = backupJson();
+    if (NATIVE) {
+      try { await ML.saveBackup({ data: json }); toast('Backup saved to Downloads/Music-backup.json'); }
+      catch (e) { toast("Couldn't save the backup on this phone"); }
+      return;
+    }
+    download(`music-backup-${new Date().toISOString().slice(0, 10)}.json`, json);
+  }
+  /* Android: keep Downloads/Music-backup.json up to date by itself. The file survives
+     uninstalling the app, so likes and playlists can be restored afterwards. */
+  autoBackup = debounce(() => {
+    if (!NATIVE || !nativeGranted) return;
+    const { worth, json } = backupJson();
+    if (worth) ML.saveBackup({ data: json }).catch(() => {});
+  }, 45000);
   function importBackup(text) {
     try {
       const d = JSON.parse(text);
