@@ -10,6 +10,7 @@ import android.content.pm.ServiceInfo;
 import android.graphics.Bitmap;
 import android.os.Build;
 import android.os.IBinder;
+import android.os.PowerManager;
 import android.os.SystemClock;
 import android.support.v4.media.MediaMetadataCompat;
 import android.support.v4.media.session.MediaSessionCompat;
@@ -46,6 +47,7 @@ public class PlaybackService extends Service {
 
     static PlaybackService instance;
     private MediaSessionCompat session;
+    private PowerManager.WakeLock wakeLock;
 
     @Override
     public void onCreate() {
@@ -59,8 +61,8 @@ public class PlaybackService extends Service {
         }
         session = new MediaSessionCompat(this, "Music");
         session.setCallback(new MediaSessionCompat.Callback() {
-            @Override public void onPlay() { send("play"); }
-            @Override public void onPause() { send("pause"); }
+            @Override public void onPlay() { optimistic(true); send("play"); }
+            @Override public void onPause() { optimistic(false); send("pause"); }
             @Override public void onSkipToNext() { send("next"); }
             @Override public void onSkipToPrevious() { send("prev"); }
             @Override public void onStop() { send("close"); }
@@ -77,6 +79,25 @@ public class PlaybackService extends Service {
         session.setActive(true);
     }
 
+    /** Flip the button at once so the notification reacts instantly; the app confirms a moment later. */
+    private void optimistic(boolean playing) {
+        STATE.playing = playing;
+        refresh();
+    }
+
+    /** Keep the CPU awake only while music is actually playing. */
+    private void updateWakeLock() {
+        try {
+            if (wakeLock == null) {
+                PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+                wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Music:playback");
+                wakeLock.setReferenceCounted(false);
+            }
+            if (STATE.playing) wakeLock.acquire(4 * 60 * 60 * 1000L);
+            else if (wakeLock.isHeld()) wakeLock.release();
+        } catch (Exception ignored) { }
+    }
+
     private void send(String action) {
         if (MediaLibraryPlugin.instance != null) MediaLibraryPlugin.instance.sendMediaAction(action);
     }
@@ -85,7 +106,7 @@ public class PlaybackService extends Service {
     public int onStartCommand(Intent intent, int flags, int startId) {
         String action = intent != null ? intent.getAction() : null;
         if (ACTION_PREV.equals(action)) send("prev");
-        else if (ACTION_TOGGLE.equals(action)) send("toggle");
+        else if (ACTION_TOGGLE.equals(action)) { optimistic(!STATE.playing); send("toggle"); }
         else if (ACTION_NEXT.equals(action)) send("next");
         else if (ACTION_LIKE.equals(action)) send("like");
         else if (ACTION_CLOSE.equals(action)) send("close");
@@ -104,6 +125,7 @@ public class PlaybackService extends Service {
 
     private void updateSession() {
         NowPlaying s = STATE;
+        updateWakeLock();
         MediaMetadataCompat.Builder meta = new MediaMetadataCompat.Builder()
             .putString(MediaMetadataCompat.METADATA_KEY_TITLE, s.title)
             .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, s.artist)
@@ -173,6 +195,7 @@ public class PlaybackService extends Service {
     @Override
     public void onDestroy() {
         instance = null;
+        try { if (wakeLock != null && wakeLock.isHeld()) wakeLock.release(); } catch (Exception ignored) { }
         if (session != null) {
             session.setActive(false);
             session.release();

@@ -31,10 +31,10 @@
   };
   // Custom flags bundled with the app (shown instead of the standard ones)
   const LOCAL_FLAGS = { IR: 'icons/flags/ir.jpg' }; // Lion and Sun flag
+  const BUNDLED = new Set((window.LOCAL_FLAG_CODES || '').split(' '));
   C.flagUrl = (code) => {
     if (LOCAL_FLAGS[code]) return LOCAL_FLAGS[code];
-    return (code && /^[A-Z]{2}$/.test(code) && !['XA', 'ZZ'].includes(code))
-      ? `https://flagcdn.com/w160/${code.toLowerCase()}.png` : null;
+    return BUNDLED.has(code) ? `icons/flags/${code.toLowerCase()}.svg` : null;
   };
 
   /* English country name → code (for MusicBrainz answers) */

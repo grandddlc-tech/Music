@@ -5,7 +5,7 @@ const root = path.join(__dirname, '..');
 const out = path.join(root, 'www');
 fs.rmSync(out, { recursive: true, force: true });
 fs.mkdirSync(out);
-for (const item of ['index.html', 'manifest.webmanifest', 'sw.js', 'css', 'js', 'vendor', 'icons']) {
+for (const item of ['index.html', 'manifest.webmanifest', 'sw.js', 'css', 'js', 'vendor', 'icons', 'fonts']) {
   fs.cpSync(path.join(root, item), path.join(out, item), { recursive: true });
 }
 console.log('Web assets copied to www/');

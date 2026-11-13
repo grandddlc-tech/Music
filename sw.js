@@ -1,8 +1,8 @@
 /* Service worker: offline support */
-const CACHE = 'music-v4';
+const CACHE = 'music-v5';
 const CORE = [
   './', './index.html', './css/style.css', './manifest.webmanifest', './icons/icon.svg', './icons/flags/ir.jpg',
-  './vendor/jsmediatags.min.js', './js/db.js', './js/artists.js', './js/country.js',
+  './vendor/jsmediatags.min.js', './js/db.js', './js/artists.js', './js/flags.js', './fonts/inter-latin-wght-normal.woff2', './js/country.js',
   './js/scanner.js', './js/player.js', './js/app.js',
 ];
 self.addEventListener('install', (e) => {

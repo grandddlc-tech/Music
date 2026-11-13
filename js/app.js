@@ -284,10 +284,18 @@
       saveArtists();
       let changed = false;
       for (const t of S.tracks.values()) if (artistKey(t) === k && resolveCountry(t)) { queueSave(t); changed = true; }
-      if (changed) softRefresh();
+      if (changed) slowRefresh();
     }
+    softRefresh();
     detecting = 0;
     updateDetectBadge();
+  }
+
+  let lastSlow = 0;
+  function slowRefresh() {
+    if (Date.now() - lastSlow < 6000) return;
+    lastSlow = Date.now();
+    softRefresh();
   }
 
   function recomputeAll() {
@@ -338,7 +346,10 @@
     const seed = t ? (t.album || t.artist || t.title || '') : (label || '');
     const hue = hash(seed) % 360;
     const letter = esc((label || (t && (t.album || t.title)) || '♪').trim().charAt(0).toUpperCase() || '♪');
-    return `<div class="cover ${cls}" data-cid="${esc(t && t.coverId || '')}" style="--h:${hue}"><span>${letter}</span></div>`;
+    const cid = t && t.coverId || '';
+    const url = cid && S.coverUrls.get(cid);
+    if (url) return `<div class="cover ${cls} has-img" data-cid="${esc(cid)}" data-hyd="1" style="--h:${hue};background-image:url('${url}')"><span>${letter}</span></div>`;
+    return `<div class="cover ${cls}" data-cid="${esc(cid)}" style="--h:${hue}"><span>${letter}</span></div>`;
   }
 
   /* =========================================================
@@ -653,7 +664,7 @@
 
   function registerList(key, tracks) { S.lists[key] = tracks.map((t) => t.id); return key; }
 
-  function trackRows(tracks, key, { showAlbum = true, numbered = false, limit = 150, showAdded = false } = {}) {
+  function trackRows(tracks, key, { showAlbum = true, numbered = false, limit = 80, showAdded = false } = {}) {
     registerList(key, tracks);
     const rows = tracks.slice(0, limit).map((t, i) => trackRow(t, key, i, { showAlbum, numbered, showAdded })).join('');
     const more = tracks.length > limit ? `<div class="load-more" data-more="${esc(key)}" data-from="${limit}" data-opts='${JSON.stringify({ showAlbum, numbered, showAdded })}'></div>` : '';
@@ -661,7 +672,7 @@
   }
   function trackRow(t, key, i, { showAlbum, numbered, showAdded }) {
     const playing = Player.current === t.id;
-    return `<div class="row ${playing ? 'playing' : ''}" data-id="${t.id}" data-list="${esc(key)}" data-i="${i}" draggable="true">
+    return `<div class="row ${playing ? 'playing' : ''} ${showAlbum ? '' : 'no-album'} ${showAdded ? 'has-added' : ''}" data-id="${t.id}" data-list="${esc(key)}" data-i="${i}" draggable="true">
       <div class="row-lead">${numbered ? `<span class="row-num">${t.trackNo || i + 1}</span>` : coverHtml(t, 'xs')}<span class="eq-anim"><i></i><i></i><i></i></span><button class="row-play" data-act="play-row" aria-label="Play">${icon('play')}</button></div>
       <div class="row-main"><div class="row-title">${esc(t.title)}</div><div class="row-sub"><a data-go="artist/${encodeURIComponent(artistKey(t))}">${esc(t.artist)}</a></div></div>
       ${showAlbum ? `<div class="row-album">${t.album ? `<a data-go="album/${encodeURIComponent(albumKeyOf(t))}">${esc(t.album)}</a>` : ''}</div>` : ''}
@@ -1098,15 +1109,19 @@
     afterRender(view);
   }
   function render() { route(); }
+  let lastTouch = 0, touching = false;
   const softRefresh = debounce(() => {
     // Re-render without losing the scroll position
     if (document.activeElement && document.activeElement.closest('#view input, #view select')) return;
+    // Don't rebuild the page under the user's finger: wait until they stop scrolling
+    if (document.hidden) return; // refreshed when the app comes back
+    if (touching || Date.now() - lastTouch < 1500) { softRefresh(); return; }
     const view = $('#view');
     const top = view.scrollTop;
     const h = location.hash.replace(/^#\/?/, '') || 'home';
     const [name, ...rest] = h.split('/');
     const fn = views[name] || views.home;
-    view.innerHTML = `<div class="page">${fn(rest.join('/'))}</div>`;
+    view.innerHTML = `<div class="page still">${fn(rest.join('/'))}</div>`;
     view.scrollTop = top;
     afterRender(view);
   }, 700);
@@ -1263,7 +1278,7 @@
       for (const x of all()) if (artistKey(x) === key) { if (code) x.manualCountry = null; resolveCountry(x); queueSave(x); }
     }
     toast(code ? `Country changed to ${Country.name(code)}` : 'Back to automatic detection');
-    softRefresh();
+    lastTouch = 0; softRefresh();
     updateNowPlaying();
   }
 
@@ -1291,7 +1306,7 @@
       for (const id of ids) if (!p.ids.includes(id)) p.ids.push(id);
       savePlaylists();
       toast(p.ids.length > before ? `Added to "${p.name}"` : 'Already in this playlist');
-      closeDialog(); softRefresh();
+      closeDialog(); lastTouch = 0; softRefresh();
     };
     $('#npl-b', d).onclick = () => {
       const name = $('#npl', d).value.trim() || `Playlist ${S.playlists.size + 1}`;
@@ -1702,6 +1717,13 @@
       $('#np').style.transition = ''; $('#np').style.transform = '';
       if (dy > 110) closeNP();
     });
+
+    const mark = () => { lastTouch = Date.now(); };
+    document.addEventListener('touchstart', () => { touching = true; mark(); }, { passive: true });
+    document.addEventListener('touchend', () => { touching = false; mark(); }, { passive: true });
+    document.addEventListener('touchcancel', () => { touching = false; mark(); }, { passive: true });
+    $('#view').addEventListener('scroll', mark, { passive: true });
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) softRefresh(); });
 
     window.addEventListener('hashchange', route);
     window.addEventListener('popstate', () => { if ($('#np').classList.contains('open') && !(history.state && history.state.np)) closeNP(true); });
